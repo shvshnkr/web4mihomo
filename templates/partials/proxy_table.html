@@ -1,0 +1,71 @@
+<div class="overflow-x-auto">
+  <table class="min-w-full border-separate border-spacing-y-1 text-left text-sm">
+    <thead class="text-xs uppercase tracking-wide text-slate-500">
+      <tr>
+        <th class="px-2 py-2">Имя</th>
+        <th class="px-2 py-2">Задержка</th>
+        <th class="px-2 py-2">Синхронизация</th>
+        <th class="px-2 py-2 text-right">Действия</th>
+      </tr>
+    </thead>
+    <tbody class="text-slate-200">
+      {% for p in store.proxies %}
+        <tr class="rounded-md bg-slate-950/60 align-middle">
+              <td class="max-w-xs truncate px-2 py-2 font-mono text-xs" title="{{ p.proxy_name }}">
+                {{ p.proxy_name }}
+                {% if not p.uri %}
+                  <span
+                    class="ml-1 rounded bg-amber-950/60 px-1 text-[10px] font-sans font-normal text-amber-200/90"
+                    title="Импорт из YAML провайдера, исходной vless:// нет"
+                    >YAML</span
+                  >
+                {% endif %}
+              </td>
+          <td class="px-2 py-2 text-xs">
+            {% if p.last_delay_ms is not none %}
+              <span class="text-emerald-300">{{ p.last_delay_ms }} ms</span>
+            {% else %}
+              <span class="text-slate-500">—</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-2 text-xs">
+            {% if p.last_sync_error %}
+              <span class="text-red-300" title="{{ p.last_sync_error }}">ошибка</span>
+            {% else %}
+              <span class="text-slate-500">ok</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-2 text-right">
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-md border border-slate-700 px-2 py-1 text-xs hover:bg-slate-900"
+                hx-post="/htmx/delay/{{ p.id }}"
+                hx-target="#dashboard-root"
+                hx-swap="innerHTML"
+              >
+                Delay
+              </button>
+              <button
+                type="button"
+                class="rounded-md border border-red-900/50 px-2 py-1 text-xs text-red-200 hover:bg-red-950/40"
+                hx-delete="/htmx/proxy/{{ p.id }}"
+                hx-target="#dashboard-root"
+                hx-swap="innerHTML"
+                hx-confirm="Удалить прокси «{{ p.proxy_name }}»?"
+              >
+                Удалить
+              </button>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="4" class="px-2 py-6 text-center text-sm text-slate-500">
+            Пока нет прокси. Добавьте первую ссылку выше.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

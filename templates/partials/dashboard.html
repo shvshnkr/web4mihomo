@@ -1,0 +1,111 @@
+<div class="space-y-8">
+  {% if message %}
+    <div
+      class="rounded-lg border px-4 py-3 text-sm whitespace-pre-wrap {% if message_kind == 'error' %}border-red-900/60 bg-red-950/30 text-red-100{% else %}border-slate-800 bg-slate-900/60 text-slate-200{% endif %}"
+    >
+      {{ message }}
+    </div>
+  {% endif %}
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
+    <h2 class="text-lg font-medium text-slate-100">Добавить прокси</h2>
+    <p class="mt-1 text-sm text-slate-400">
+      Вставьте одну или несколько ссылок <code class="text-slate-300">vless://</code> (не подписку) — по
+      <strong>одной на строку</strong>. Строки с <code class="text-slate-400">#</code> в начале считаются комментарием.
+    </p>
+    <form
+      class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
+      hx-post="/htmx/add"
+      hx-target="#dashboard-root"
+      hx-swap="innerHTML"
+    >
+      <label class="flex-1">
+        <span class="sr-only">Ссылки</span>
+        <textarea
+          name="link"
+          rows="8"
+          placeholder="vless://...&#10;vless://..."
+          class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        ></textarea>
+      </label>
+      <button
+        type="submit"
+        class="h-10 shrink-0 rounded-md bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-500"
+      >
+        Добавить
+      </button>
+    </form>
+  </section>
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2 class="text-lg font-medium text-slate-100">Текущие прокси</h2>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          class="rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+          hx-post="/htmx/sync"
+          hx-target="#dashboard-root"
+          hx-swap="innerHTML"
+        >
+          Синхронизировать с mihomo
+        </button>
+        <div class="flex flex-col items-end gap-0.5">
+          <button
+            type="button"
+            class="rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+            hx-post="/htmx/test-all"
+            hx-target="#dashboard-root"
+            hx-swap="innerHTML"
+          >
+            Delay: все
+          </button>
+          <span class="max-w-xs text-right text-[10px] leading-tight text-slate-500"
+            >Только задержка по строкам таблицы. Узлы не добавляет — сначала «Добавить» или пустой JSON + «Синхронизировать» (импорт из YAML).</span
+          >
+        </div>
+      </div>
+    </div>
+    <div class="mt-2 text-right text-xs text-slate-500">
+      <div>
+        Провайдер YAML:
+        <code class="text-slate-400">{{ settings.provider_yaml_path }}</code>
+      </div>
+      <div class="mt-1">
+        JSON store:
+        <code class="text-slate-400">{{ settings.json_store_path }}</code>
+      </div>
+    </div>
+
+    <div class="mt-4">{% include "partials/proxy_table.html" %}</div>
+  </section>
+
+  <details class="rounded-xl border border-slate-800 bg-slate-900/20 p-4 text-sm text-slate-300">
+    <summary class="cursor-pointer select-none text-slate-200">Помощь: bootstrap mihomo и обновление с GitHub</summary>
+    <div class="mt-3 space-y-3 text-xs leading-relaxed text-slate-400">
+      <p>
+        В конфигурации mihomo один раз добавьте file <code class="text-slate-300">proxy-providers</code> с
+        <code class="text-slate-300">path</code>, совпадающим с
+        <code class="text-slate-300">provider_yaml_path</code> этого приложения, и две (или одну) группы с
+        <code class="text-slate-300">use: [&lt;имя провайдера&gt;]</code>.
+      </p>
+      <p class="font-mono text-[11px] text-slate-500 whitespace-pre-wrap">{{ settings.bootstrap_yaml_hint() }}</p>
+      <p>
+        Имя провайдера в mihomo должно совпадать с
+        <code class="text-slate-300">PROVIDER_NAME={{ settings.provider_name }}</code>. External Controller:
+        Bearer secret из <code class="text-slate-300">MIHOMO_SECRET</code>.
+      </p>
+      <p>
+        <strong class="text-slate-300">Обновление кода с GitHub:</strong> держите в репозитории только исходники; каталог
+        <code class="text-slate-400">data/</code> и файл <code class="text-slate-400">.env</code> добавьте в
+        <code class="text-slate-400">.gitignore</code> на сервере (они уже в шаблоне проекта). Тогда
+        <code class="text-slate-400">git pull</code> не перезапишет ваши прокси и секреты — они остаются на диске рядом с
+        клоном.
+      </p>
+      <p>
+        Подробные логи в консоли uvicorn: по умолчанию включены (<code class="text-slate-400">WEB4_VERBOSE_LOG=true</code>).
+        Краткий режим: <code class="text-slate-400">WEB4_VERBOSE_LOG=false</code>.
+      </p>
+    </div>
+  </details>
+</div>
