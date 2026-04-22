@@ -1,7 +1,9 @@
-"""Client for provider subscription endpoints returning JSON with ``links``."""
+"""Client for provider subscription endpoints (JSON or URI list text)."""
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +28,7 @@ async def fetch_subscription_snapshot(
     *,
     timeout_s: float = 20.0,
 ) -> SubscriptionSnapshot:
-    """Fetch and validate JSON payload from subscription URL."""
+    """Fetch and parse subscription response as JSON or plain URI list."""
     try:
         async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as client:
             resp = await client.get(url)
@@ -34,31 +36,28 @@ async def fetch_subscription_snapshot(
     except httpx.HTTPError as e:
         raise SubscriptionFetchError(f"Не удалось загрузить подписку: {e}") from e
 
-    try:
-        data = resp.json()
-    except ValueError as e:
-        raise SubscriptionFetchError("Подписка вернула не-JSON ответ.") from e
+    text = resp.text or ""
+    data = _try_parse_json(text)
+    if isinstance(data, dict):
+        links = _links_from_json_dict(data)
+        if links:
+            user = _parse_user(data.get("user"))
+            sub_url = data.get("subscriptionUrl")
+            if not isinstance(sub_url, str):
+                sub_url = None
+            return SubscriptionSnapshot(links=links, user=user, subscription_url=sub_url)
 
-    if not isinstance(data, dict):
-        raise SubscriptionFetchError("Неверный формат подписки: ожидается JSON-объект.")
+    links = _links_from_text(text)
+    if links:
+        return SubscriptionSnapshot(links=links, user=None, subscription_url=url)
 
-    links_raw = data.get("links")
-    if not isinstance(links_raw, list):
-        raise SubscriptionFetchError("Неверный формат подписки: поле links должно быть массивом.")
+    decoded_links = _links_from_base64_text(text)
+    if decoded_links:
+        return SubscriptionSnapshot(links=decoded_links, user=None, subscription_url=url)
 
-    links: list[str] = []
-    for v in links_raw:
-        if isinstance(v, str) and v.strip():
-            links.append(v.strip())
-    if not links:
-        raise SubscriptionFetchError("Подписка не содержит ссылок в поле links.")
-
-    user = _parse_user(data.get("user"))
-    sub_url = data.get("subscriptionUrl")
-    if not isinstance(sub_url, str):
-        sub_url = None
-
-    return SubscriptionSnapshot(links=links, user=user, subscription_url=sub_url)
+    raise SubscriptionFetchError(
+        "Подписка не распознана: ожидается JSON с links, текстовый список URI или base64-представление."
+    )
 
 
 def _parse_user(raw: Any) -> SubscriptionUser | None:
@@ -68,3 +67,45 @@ def _parse_user(raw: Any) -> SubscriptionUser | None:
         return SubscriptionUser.model_validate(raw)
     except Exception:
         return None
+
+
+def _try_parse_json(text: str) -> Any:
+    s = text.strip()
+    if not s:
+        return None
+    if not (s.startswith("{") or s.startswith("[")):
+        return None
+    try:
+        return json.loads(s)
+    except ValueError:
+        return None
+
+
+def _links_from_json_dict(data: dict[str, Any]) -> list[str]:
+    links_raw = data.get("links")
+    if not isinstance(links_raw, list):
+        return []
+    return [v.strip() for v in links_raw if isinstance(v, str) and v.strip()]
+
+
+def _links_from_text(text: str) -> list[str]:
+    links: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "://" in line:
+            links.append(line)
+    return links
+
+
+def _links_from_base64_text(text: str) -> list[str]:
+    compact = "".join(text.split())
+    if not compact:
+        return []
+    try:
+        padded = compact + ("=" * ((4 - len(compact) % 4) % 4))
+        decoded = base64.b64decode(padded, validate=False).decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+    return _links_from_text(decoded)

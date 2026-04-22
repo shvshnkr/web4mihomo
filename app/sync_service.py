@@ -35,8 +35,16 @@ def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) 
             "data": data,
             "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
         }
-        with open("debug-41d724.log", "a", encoding="utf-8") as f:
+        debug_path = Path(__file__).resolve().parent.parent / "debug-41d724.log"
+        with open(debug_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        log.debug(
+            "DBG[%s] %s %s data=%s",
+            hypothesis_id,
+            location,
+            message,
+            data,
+        )
     except Exception:
         pass
     # endregion
