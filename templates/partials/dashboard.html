@@ -95,6 +95,9 @@
                 {% if s.last_refresh_at %}
                   <div class="text-[10px] text-slate-500">updated: {{ s.last_refresh_at }}</div>
                 {% endif %}
+                {% if s.excluded_uris %}
+                  <div class="text-[10px] text-amber-300">excluded: {{ s.excluded_uris|length }}</div>
+                {% endif %}
               </td>
               <td class="px-2 py-2 text-xs">{{ s.links|length }}</td>
               <td class="px-2 py-2 text-xs">
@@ -147,6 +150,35 @@
         </tbody>
       </table>
     </div>
+    {% if store.subscriptions %}
+      <div class="mt-4 space-y-3">
+        {% for s in store.subscriptions %}
+          {% if s.excluded_uris %}
+            <details class="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+              <summary class="cursor-pointer text-xs text-slate-300">
+                Исключения подписки: {{ s.name or s.url }} ({{ s.excluded_uris|length }})
+              </summary>
+              <div class="mt-2 space-y-2">
+                {% for u in s.excluded_uris %}
+                  <div class="flex items-center justify-between gap-2 rounded border border-slate-800 bg-slate-900/40 px-2 py-1">
+                    <code class="truncate text-[10px] text-slate-300" title="{{ u }}">{{ u }}</code>
+                    <form hx-post="/htmx/subscription/{{ s.id }}/restore" hx-target="#dashboard-root" hx-swap="innerHTML">
+                      <input type="hidden" name="uri" value="{{ u }}" />
+                      <button
+                        type="submit"
+                        class="rounded-md border border-emerald-900/50 px-2 py-1 text-[10px] text-emerald-200 hover:bg-emerald-950/30"
+                      >
+                        Restore
+                      </button>
+                    </form>
+                  </div>
+                {% endfor %}
+              </div>
+            </details>
+          {% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
   </section>
 
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">

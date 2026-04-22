@@ -29,6 +29,10 @@ def _store(settings: SettingsDep) -> StoreJson:
     return StoreJson(settings.json_store_path)
 
 
+def _norm_uri(uri: str) -> str:
+    return (uri or "").strip()
+
+
 def _render_dashboard(
     request: Request,
     settings: SettingsDep,
@@ -218,6 +222,73 @@ async def htmx_subscription_delete(
     updated, err = await persist_and_reload(settings, store)
     st.save(updated)
     msg = "Подписка удалена."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
+@router.post("/subscription/{subscription_id}/exclude/{proxy_id}", response_class=HTMLResponse)
+async def htmx_subscription_exclude_proxy(
+    request: Request,
+    subscription_id: str,
+    proxy_id: str,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+):
+    st = _store(settings)
+    store = st.load()
+    sub = next((s for s in store.subscriptions if s.id == subscription_id), None)
+    if not sub:
+        return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
+
+    item = next((p for p in store.proxies if p.id == proxy_id), None)
+    if not item or item.source_type != "subscription" or item.subscription_id != subscription_id or not item.uri:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message="Нельзя исключить этот узел: он не принадлежит выбранной подписке.",
+            message_kind="error",
+        )
+
+    uri = _norm_uri(item.uri)
+    excluded = {_norm_uri(u) for u in sub.excluded_uris if _norm_uri(u)}
+    excluded.add(uri)
+    sub.excluded_uris = sorted(excluded)
+    updated, err = await persist_and_reload(settings, store)
+    st.save(updated)
+    msg = "Узел исключен из подписки."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
+@router.post("/subscription/{subscription_id}/restore", response_class=HTMLResponse)
+async def htmx_subscription_restore_uri(
+    request: Request,
+    subscription_id: str,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+    uri: str = Form(""),
+):
+    st = _store(settings)
+    store = st.load()
+    sub = next((s for s in store.subscriptions if s.id == subscription_id), None)
+    if not sub:
+        return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
+
+    target = _norm_uri(uri)
+    if not target:
+        return _render_dashboard(request, settings, store, message="URI для восстановления пустой.", message_kind="error")
+
+    before = len(sub.excluded_uris)
+    sub.excluded_uris = [u for u in sub.excluded_uris if _norm_uri(u) != target]
+    if len(sub.excluded_uris) == before:
+        return _render_dashboard(request, settings, store, message="Исключение не найдено.", message_kind="error")
+
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
+    st.save(updated)
+    msg = "Исключение снято, узел может вернуться после refresh."
     if err:
         msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
     return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")

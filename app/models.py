@@ -52,6 +52,10 @@ class StoredSubscription(BaseModel):
     url: str = Field(..., description="Subscription endpoint URL.")
     enabled: bool = Field(default=True)
     links: list[str] = Field(default_factory=list)
+    excluded_uris: list[str] = Field(
+        default_factory=list,
+        description="Sticky exclude list for subscription URIs.",
+    )
     user: SubscriptionUser | None = None
     last_refresh_at: str | None = None
     last_error: str | None = None

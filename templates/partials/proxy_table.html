@@ -56,16 +56,29 @@
               >
                 Delay
               </button>
-              <button
-                type="button"
-                class="rounded-md border border-red-900/50 px-2 py-1 text-xs text-red-200 hover:bg-red-950/40"
-                hx-delete="/htmx/proxy/{{ p.id }}"
-                hx-target="#dashboard-root"
-                hx-swap="innerHTML"
-                hx-confirm="Удалить прокси «{{ p.proxy_name }}»?"
-              >
-                Удалить
-              </button>
+              {% if p.source_type == "subscription" and p.subscription_id %}
+                <button
+                  type="button"
+                  class="rounded-md border border-amber-900/50 px-2 py-1 text-xs text-amber-200 hover:bg-amber-950/30"
+                  hx-post="/htmx/subscription/{{ p.subscription_id }}/exclude/{{ p.id }}"
+                  hx-target="#dashboard-root"
+                  hx-swap="innerHTML"
+                  hx-confirm="Исключить узел «{{ p.proxy_name }}» из подписки?"
+                >
+                  Exclude
+                </button>
+              {% else %}
+                <button
+                  type="button"
+                  class="rounded-md border border-red-900/50 px-2 py-1 text-xs text-red-200 hover:bg-red-950/40"
+                  hx-delete="/htmx/proxy/{{ p.id }}"
+                  hx-target="#dashboard-root"
+                  hx-swap="innerHTML"
+                  hx-confirm="Удалить прокси «{{ p.proxy_name }}»?"
+                >
+                  Удалить
+                </button>
+              {% endif %}
             </div>
           </td>
         </tr>
