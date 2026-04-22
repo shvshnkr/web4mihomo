@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,25 @@ from app.vless_uri import parse_vless_uri
 from app.vless_to_proxy import suggest_proxy_name, to_mihomo_proxy
 
 log = logging.getLogger("web4mihomo.sync")
+
+
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "41d724",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        with open("debug-41d724.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 def unique_proxy_name_from_store(store: ProxyStore, base: str) -> str:
@@ -98,6 +118,15 @@ def build_proxy_dicts(store: ProxyStore) -> list[dict[str, Any]]:
 async def refresh_enabled_subscriptions(store: ProxyStore, settings: Settings) -> ProxyStore:
     """Fetch all enabled subscriptions and store latest links/user snapshot."""
     updated = store.model_copy(deep=True)
+    _dbg(
+        "H1",
+        "app/sync_service.py:refresh_enabled_subscriptions",
+        "refresh_start",
+        {
+            "subscriptions_total": len(updated.subscriptions),
+            "enabled_count": len([s for s in updated.subscriptions if s.enabled]),
+        },
+    )
     for sub in updated.subscriptions:
         if not sub.enabled:
             continue
@@ -112,9 +141,29 @@ async def refresh_enabled_subscriptions(store: ProxyStore, settings: Settings) -
                 sub.url = snap.subscription_url
             sub.last_error = None
             sub.last_refresh_at = datetime.now(timezone.utc).isoformat()
+            _dbg(
+                "H1",
+                "app/sync_service.py:refresh_enabled_subscriptions",
+                "refresh_success",
+                {
+                    "subscription_id": sub.id,
+                    "links_count": len(sub.links),
+                    "has_user": sub.user is not None,
+                    "last_error": sub.last_error,
+                },
+            )
         except SubscriptionFetchError as e:
             sub.last_error = str(e)
             sub.last_refresh_at = datetime.now(timezone.utc).isoformat()
+            _dbg(
+                "H1",
+                "app/sync_service.py:refresh_enabled_subscriptions",
+                "refresh_error",
+                {
+                    "subscription_id": sub.id,
+                    "error": sub.last_error,
+                },
+            )
     return updated
 
 
@@ -145,7 +194,29 @@ def _build_subscription_proxies(sub: StoredSubscription, existing_names: set[str
         except ValueError:
             parse_errors += 1
     if parse_errors:
+        _dbg(
+            "H2",
+            "app/sync_service.py:_build_subscription_proxies",
+            "subscription_parse_warnings",
+            {
+                "subscription_id": sub.id,
+                "links_in": len(sub.links),
+                "built": len(built),
+                "parse_errors": parse_errors,
+            },
+        )
         return built, f"Некоторые ссылки не распознаны: {parse_errors}"
+    _dbg(
+        "H2",
+        "app/sync_service.py:_build_subscription_proxies",
+        "subscription_parse_ok",
+        {
+            "subscription_id": sub.id,
+            "links_in": len(sub.links),
+            "built": len(built),
+            "parse_errors": 0,
+        },
+    )
     return built, None
 
 
@@ -165,7 +236,30 @@ def materialize_subscription_proxies(store: ProxyStore) -> ProxyStore:
         generated.extend(built)
         if parse_warn and not sub.last_error:
             sub.last_error = parse_warn
-    return ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+        _dbg(
+            "H3",
+            "app/sync_service.py:materialize_subscription_proxies",
+            "materialize_one_subscription",
+            {
+                "subscription_id": sub.id,
+                "enabled": sub.enabled,
+                "built_count": len(built),
+                "parse_warn": parse_warn,
+                "last_error_after_materialize": sub.last_error,
+            },
+        )
+    out = ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+    _dbg(
+        "H3",
+        "app/sync_service.py:materialize_subscription_proxies",
+        "materialize_done",
+        {
+            "manual_count": len(manual),
+            "generated_count": len(generated),
+            "result_proxies": len(out.proxies),
+        },
+    )
+    return out
 
 
 def write_provider_file(path: Path, proxies: list[dict[str, Any]]) -> None:
@@ -192,6 +286,17 @@ async def persist_and_reload(
         store = await refresh_enabled_subscriptions(store, settings)
 
     store = materialize_subscription_proxies(store)
+    _dbg(
+        "H4",
+        "app/sync_service.py:persist_and_reload",
+        "before_write_provider",
+        {
+            "refresh_subscriptions": refresh_subscriptions,
+            "store_proxies": len(store.proxies),
+            "subs_with_error": len([s for s in store.subscriptions if s.last_error]),
+            "subs_total": len(store.subscriptions),
+        },
+    )
     store = hydrate_store_from_provider_yaml(store, settings)
     proxies = build_proxy_dicts(store)
     log.debug(
