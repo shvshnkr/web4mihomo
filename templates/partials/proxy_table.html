@@ -10,10 +10,20 @@
     </thead>
     <tbody class="text-slate-200">
       {% for p in store.proxies %}
-        <tr class="rounded-md bg-slate-950/60 align-middle">
+        <tr
+          class="rounded-md bg-slate-950/60 align-middle"
+          data-proxy-row="1"
+          data-source="{% if p.source_type == 'subscription' %}subscription{% elif not p.uri %}yaml{% else %}manual{% endif %}"
+        >
               <td class="max-w-xs truncate px-2 py-2 font-mono text-xs" title="{{ p.proxy_name }}">
                 {{ p.proxy_name }}
-                {% if not p.uri %}
+                {% if p.source_type == "subscription" %}
+                  <span
+                    class="ml-1 rounded bg-emerald-950/60 px-1 text-[10px] font-sans font-normal text-emerald-200/90"
+                    title="Сгенерировано из подписки"
+                    >SUB</span
+                  >
+                {% elif not p.uri %}
                   <span
                     class="ml-1 rounded bg-amber-950/60 px-1 text-[10px] font-sans font-normal text-amber-200/90"
                     title="Импорт из YAML провайдера, исходной vless:// нет"

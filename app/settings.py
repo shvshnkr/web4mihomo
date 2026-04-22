@@ -115,6 +115,22 @@ class Settings(BaseSettings):
         default=True,
         description="Подробные логи (маршруты, шаги синхронизации). Выключить: WEB4_VERBOSE_LOG=false.",
     )
+    subscriptions_refresh_on_startup: bool = Field(
+        default=True,
+        description="If true, refresh enabled subscriptions when app starts.",
+    )
+    subscriptions_auto_refresh_interval_sec: int = Field(
+        default=0,
+        ge=0,
+        le=86400,
+        description="Periodic enabled subscriptions refresh interval in seconds (0 disables scheduler).",
+    )
+    subscriptions_fetch_timeout_sec: float = Field(
+        default=20.0,
+        ge=3.0,
+        le=120.0,
+        description="HTTP timeout for subscription URL fetch.",
+    )
 
     @property
     def session_secret(self) -> str:

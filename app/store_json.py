@@ -1,4 +1,4 @@
-"""JSON persistence for stored ``vless://`` links (atomic writes)."""
+"""JSON persistence for stored proxies/subscriptions (atomic writes)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from app.models import ProxyStore, StoredProxy
+from app.models import ProxyStore, StoredProxy, StoredSubscription
 
 
 class StoreJson:
@@ -55,7 +55,18 @@ class StoreJson:
         return store
 
     def remove(self, store: ProxyStore, proxy_id: str) -> ProxyStore:
-        store = ProxyStore(proxies=[p for p in store.proxies if p.id != proxy_id])
+        store = ProxyStore(
+            proxies=[p for p in store.proxies if p.id != proxy_id],
+            subscriptions=store.subscriptions,
+        )
+        self.save(store)
+        return store
+
+    def remove_by_subscription(self, store: ProxyStore, subscription_id: str) -> ProxyStore:
+        store = ProxyStore(
+            proxies=[p for p in store.proxies if p.subscription_id != subscription_id],
+            subscriptions=store.subscriptions,
+        )
         self.save(store)
         return store
 
@@ -63,4 +74,25 @@ class StoreJson:
         for p in store.proxies:
             if p.id == proxy_id:
                 return p
+        return None
+
+    def upsert_subscription(self, store: ProxyStore, item: StoredSubscription) -> ProxyStore:
+        subs = [s for s in store.subscriptions if s.id != item.id]
+        subs.append(item)
+        store = ProxyStore(proxies=store.proxies, subscriptions=subs)
+        self.save(store)
+        return store
+
+    def remove_subscription(self, store: ProxyStore, subscription_id: str) -> ProxyStore:
+        store = ProxyStore(
+            proxies=[p for p in store.proxies if p.subscription_id != subscription_id],
+            subscriptions=[s for s in store.subscriptions if s.id != subscription_id],
+        )
+        self.save(store)
+        return store
+
+    def subscription_by_id(self, store: ProxyStore, subscription_id: str) -> StoredSubscription | None:
+        for s in store.subscriptions:
+            if s.id == subscription_id:
+                return s
         return None

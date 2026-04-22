@@ -38,9 +38,133 @@
   </section>
 
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
+    <h2 class="text-lg font-medium text-slate-100">Подписки</h2>
+    <p class="mt-1 text-sm text-slate-400">
+      URL подписки с JSON-ответом и массивом <code class="text-slate-300">links</code>. Ссылки из подписки добавляются в провайдер автоматически.
+    </p>
+    <form
+      class="mt-4 grid gap-3 sm:grid-cols-4"
+      hx-post="/htmx/subscription/add"
+      hx-target="#dashboard-root"
+      hx-swap="innerHTML"
+    >
+      <label class="sm:col-span-3">
+        <span class="sr-only">URL подписки</span>
+        <input
+          name="url"
+          type="url"
+          placeholder="https://example.com/api/sub/..."
+          class="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        />
+      </label>
+      <label>
+        <span class="sr-only">Название</span>
+        <input
+          name="name"
+          type="text"
+          placeholder="Название (опц.)"
+          class="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        />
+      </label>
+      <button
+        type="submit"
+        class="h-10 rounded-md bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-500 sm:col-span-4 sm:justify-self-end"
+      >
+        Добавить подписку
+      </button>
+    </form>
+
+    <div class="mt-4 overflow-x-auto">
+      <table class="min-w-full border-separate border-spacing-y-1 text-left text-sm">
+        <thead class="text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-2 py-2">Подписка</th>
+            <th class="px-2 py-2">Ссылки</th>
+            <th class="px-2 py-2">Статус</th>
+            <th class="px-2 py-2 text-right">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="text-slate-200">
+          {% for s in store.subscriptions %}
+            <tr class="rounded-md bg-slate-950/60 align-middle">
+              <td class="max-w-sm px-2 py-2 text-xs">
+                <div class="truncate font-medium" title="{{ s.url }}">{{ s.name or s.url }}</div>
+                {% if s.user and s.user.username %}
+                  <div class="text-[10px] text-slate-400">user: {{ s.user.username }}</div>
+                {% endif %}
+                {% if s.last_refresh_at %}
+                  <div class="text-[10px] text-slate-500">updated: {{ s.last_refresh_at }}</div>
+                {% endif %}
+              </td>
+              <td class="px-2 py-2 text-xs">{{ s.links|length }}</td>
+              <td class="px-2 py-2 text-xs">
+                {% if not s.enabled %}
+                  <span class="text-slate-400">выключена</span>
+                {% elif s.last_error %}
+                  <span class="text-red-300" title="{{ s.last_error }}">ошибка</span>
+                {% else %}
+                  <span class="text-emerald-300">ok</span>
+                {% endif %}
+              </td>
+              <td class="px-2 py-2 text-right">
+                <div class="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    class="rounded-md border border-slate-700 px-2 py-1 text-xs hover:bg-slate-900"
+                    hx-post="/htmx/subscription/{{ s.id }}/refresh"
+                    hx-target="#dashboard-root"
+                    hx-swap="innerHTML"
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md border border-slate-700 px-2 py-1 text-xs hover:bg-slate-900"
+                    hx-post="/htmx/subscription/{{ s.id }}/toggle"
+                    hx-target="#dashboard-root"
+                    hx-swap="innerHTML"
+                  >
+                    {% if s.enabled %}Выключить{% else %}Включить{% endif %}
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md border border-red-900/50 px-2 py-1 text-xs text-red-200 hover:bg-red-950/40"
+                    hx-delete="/htmx/subscription/{{ s.id }}"
+                    hx-target="#dashboard-root"
+                    hx-swap="innerHTML"
+                    hx-confirm="Удалить подписку «{{ s.name or s.url }}»?"
+                  >
+                    Удалить
+                  </button>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="4" class="px-2 py-4 text-center text-sm text-slate-500">Подписок пока нет.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-lg font-medium text-slate-100">Текущие прокси</h2>
       <div class="flex flex-wrap items-center gap-2">
+        <label class="flex items-center gap-2 text-xs text-slate-400">
+          <span>Фильтр:</span>
+          <select
+            id="proxy-source-filter"
+            class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+          >
+            <option value="all">Все</option>
+            <option value="manual">Только ручные</option>
+            <option value="subscription">Только подписки</option>
+            <option value="yaml">Только YAML-импорт</option>
+          </select>
+        </label>
         <button
           type="button"
           class="rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
@@ -79,6 +203,22 @@
 
     <div class="mt-4">{% include "partials/proxy_table.html" %}</div>
   </section>
+  <script>
+    (function () {
+      const filter = document.getElementById("proxy-source-filter");
+      if (!filter) return;
+      const apply = () => {
+        const value = filter.value;
+        document.querySelectorAll("[data-proxy-row]").forEach((row) => {
+          const source = row.getAttribute("data-source");
+          const show = value === "all" || source === value;
+          row.style.display = show ? "" : "none";
+        });
+      };
+      filter.addEventListener("change", apply);
+      apply();
+    })();
+  </script>
 
   <details class="rounded-xl border border-slate-800 bg-slate-900/20 p-4 text-sm text-slate-300">
     <summary class="cursor-pointer select-none text-slate-200">Помощь: bootstrap mihomo и обновление с GitHub</summary>

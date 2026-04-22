@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +12,12 @@ import httpx
 import yaml
 
 from app.mihomo_client import MihomoAPIError, MihomoClient
-from app.models import ProxyStore, StoredProxy
+from app.models import ProxyStore, StoredProxy, StoredSubscription
 from app.provider_render import render_provider_yaml
 from app.settings import Settings
+from app.subscription_client import SubscriptionFetchError, fetch_subscription_snapshot
 from app.vless_uri import parse_vless_uri
-from app.vless_to_proxy import to_mihomo_proxy
+from app.vless_to_proxy import suggest_proxy_name, to_mihomo_proxy
 
 log = logging.getLogger("web4mihomo.sync")
 
@@ -93,6 +95,79 @@ def build_proxy_dicts(store: ProxyStore) -> list[dict[str, Any]]:
     return out
 
 
+async def refresh_enabled_subscriptions(store: ProxyStore, settings: Settings) -> ProxyStore:
+    """Fetch all enabled subscriptions and store latest links/user snapshot."""
+    updated = store.model_copy(deep=True)
+    for sub in updated.subscriptions:
+        if not sub.enabled:
+            continue
+        try:
+            snap = await fetch_subscription_snapshot(
+                sub.url,
+                timeout_s=settings.subscriptions_fetch_timeout_sec,
+            )
+            sub.links = snap.links
+            sub.user = snap.user
+            if snap.subscription_url:
+                sub.url = snap.subscription_url
+            sub.last_error = None
+            sub.last_refresh_at = datetime.now(timezone.utc).isoformat()
+        except SubscriptionFetchError as e:
+            sub.last_error = str(e)
+            sub.last_refresh_at = datetime.now(timezone.utc).isoformat()
+    return updated
+
+
+def _build_subscription_proxies(sub: StoredSubscription, existing_names: set[str]) -> tuple[list[StoredProxy], str | None]:
+    """Create derived StoredProxy rows from subscription links."""
+    built: list[StoredProxy] = []
+    seen_uris: set[str] = set()
+    parse_errors = 0
+    for uri in sub.links:
+        u = uri.strip()
+        if not u or u in seen_uris or not u.lower().startswith("vless://"):
+            continue
+        seen_uris.add(u)
+        try:
+            parsed = parse_vless_uri(u)
+            base_name = suggest_proxy_name(parsed)
+            name = unique_proxy_name(base_name, existing_names)
+            existing_names.add(name)
+            built.append(
+                StoredProxy(
+                    uri=u,
+                    proxy_name=name,
+                    proxy_payload=None,
+                    source_type="subscription",
+                    subscription_id=sub.id,
+                )
+            )
+        except ValueError:
+            parse_errors += 1
+    if parse_errors:
+        return built, f"Некоторые ссылки не распознаны: {parse_errors}"
+    return built, None
+
+
+def materialize_subscription_proxies(store: ProxyStore) -> ProxyStore:
+    """
+    Keep manual proxies intact and rebuild subscription-derived proxies
+    from current subscription links.
+    """
+    manual = [p for p in store.proxies if p.source_type != "subscription"]
+    existing_names = {p.proxy_name for p in manual}
+    generated: list[StoredProxy] = []
+    updated_subs = [s.model_copy(deep=True) for s in store.subscriptions]
+    for sub in updated_subs:
+        if not sub.enabled:
+            continue
+        built, parse_warn = _build_subscription_proxies(sub, existing_names)
+        generated.extend(built)
+        if parse_warn and not sub.last_error:
+            sub.last_error = parse_warn
+    return ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+
+
 def write_provider_file(path: Path, proxies: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = render_provider_yaml(proxies)
@@ -103,6 +178,7 @@ async def persist_and_reload(
     settings: Settings,
     store: ProxyStore,
     *,
+    refresh_subscriptions: bool = False,
     client: MihomoClient | None = None,
 ) -> tuple[ProxyStore, str | None]:
     """
@@ -112,6 +188,10 @@ async def persist_and_reload(
     if client is None:
         client = MihomoClient(settings)
 
+    if refresh_subscriptions:
+        store = await refresh_enabled_subscriptions(store, settings)
+
+    store = materialize_subscription_proxies(store)
     store = hydrate_store_from_provider_yaml(store, settings)
     proxies = build_proxy_dicts(store)
     log.debug(

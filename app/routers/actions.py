@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.deps import SettingsDep, require_ui_session_htmx
 from app.mihomo_client import MihomoAPIError, MihomoClient
-from app.models import AddProxyForm, ProxyStore, StoredProxy
+from app.models import AddProxyForm, AddSubscriptionForm, ProxyStore, StoredProxy, StoredSubscription
 from app.store_json import StoreJson
 from app.sync_service import persist_and_reload, unique_proxy_name_from_store
 from app.vless_bulk import split_bulk_vless_lines
@@ -116,6 +116,113 @@ async def htmx_add(
     return _render_dashboard(request, settings, updated, message=msg, message_kind=kind)
 
 
+@router.post("/subscription/add", response_class=HTMLResponse)
+async def htmx_subscription_add(
+    request: Request,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+    url: str = Form(""),
+    name: str = Form(""),
+):
+    st = _store(settings)
+    store = st.load()
+    form = AddSubscriptionForm.from_form(url=url, name=name)
+    if not form.url:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message="Укажите URL подписки.",
+            message_kind="error",
+        )
+
+    existed = next((s for s in store.subscriptions if s.url == form.url), None)
+    if existed:
+        if form.name:
+            existed.name = form.name
+        store = ProxyStore(proxies=store.proxies, subscriptions=store.subscriptions)
+    else:
+        store = ProxyStore(
+            proxies=store.proxies,
+            subscriptions=[
+                *store.subscriptions,
+                StoredSubscription(url=form.url, name=form.name),
+            ],
+        )
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
+    st.save(updated)
+    msg = "Подписка добавлена и обновлена." if not existed else "Подписка уже была в списке, данные обновлены."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
+@router.post("/subscription/{subscription_id}/refresh", response_class=HTMLResponse)
+async def htmx_subscription_refresh(
+    request: Request,
+    subscription_id: str,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+):
+    st = _store(settings)
+    store = st.load()
+    if not next((s for s in store.subscriptions if s.id == subscription_id), None):
+        return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
+
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
+    st.save(updated)
+    msg = "Подписка обновлена."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
+@router.post("/subscription/{subscription_id}/toggle", response_class=HTMLResponse)
+async def htmx_subscription_toggle(
+    request: Request,
+    subscription_id: str,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+):
+    st = _store(settings)
+    store = st.load()
+    target = next((s for s in store.subscriptions if s.id == subscription_id), None)
+    if not target:
+        return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
+    target.enabled = not target.enabled
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=target.enabled)
+    st.save(updated)
+    state = "включена" if target.enabled else "выключена"
+    msg = f"Подписка {state}."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
+@router.delete("/subscription/{subscription_id}", response_class=HTMLResponse)
+async def htmx_subscription_delete(
+    request: Request,
+    subscription_id: str,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+):
+    st = _store(settings)
+    store = st.load()
+    before = len(store.subscriptions)
+    store = ProxyStore(
+        proxies=[p for p in store.proxies if p.subscription_id != subscription_id],
+        subscriptions=[s for s in store.subscriptions if s.id != subscription_id],
+    )
+    if len(store.subscriptions) == before:
+        return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
+    updated, err = await persist_and_reload(settings, store)
+    st.save(updated)
+    msg = "Подписка удалена."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
 @router.delete("/proxy/{proxy_id}", response_class=HTMLResponse)
 async def htmx_delete(
     request: Request,
@@ -126,7 +233,10 @@ async def htmx_delete(
     log.info("DELETE /htmx/proxy/%s", proxy_id)
     st = _store(settings)
     store = st.load()
-    store = ProxyStore(proxies=[p for p in store.proxies if p.id != proxy_id])
+    store = ProxyStore(
+        proxies=[p for p in store.proxies if p.id != proxy_id],
+        subscriptions=store.subscriptions,
+    )
     st.save(store)
     updated, err = await persist_and_reload(settings, store)
     st.save(updated)
@@ -145,7 +255,7 @@ async def htmx_sync(
     st = _store(settings)
     store = st.load()
     n_before = len(store.proxies)
-    updated, err = await persist_and_reload(settings, store)
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
     st.save(updated)
     log.info(
         "POST /htmx/sync: готово, было %d узлов в JSON, стало %d, err=%s",
