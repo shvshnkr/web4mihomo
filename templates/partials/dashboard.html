@@ -30,11 +30,22 @@
           class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
         ></textarea>
       </label>
+      <label>
+        <span class="sr-only">Раундов preview ping</span>
+        <input
+          name="preview_rounds"
+          type="number"
+          min="1"
+          max="10"
+          value="{{ manual_preview.ping_rounds if manual_preview else 1 }}"
+          class="h-10 w-24 rounded-md border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        />
+      </label>
       <button
         type="submit"
         class="h-10 shrink-0 rounded-md bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-500"
       >
-        Preview
+        Preview xN
       </button>
     </form>
     {% if manual_preview %}
@@ -52,6 +63,7 @@
           {% if manual_preview.valid %}
             <form hx-post="/htmx/add/confirm" hx-target="#dashboard-root" hx-swap="innerHTML">
               <textarea name="link" class="hidden">{{ manual_preview.raw }}</textarea>
+              <input type="hidden" name="preview_rounds" value="{{ manual_preview.ping_rounds or 1 }}" />
               <button
                 type="submit"
                 class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
@@ -136,11 +148,22 @@
           class="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
         />
       </label>
+      <label>
+        <span class="sr-only">Раундов preview ping</span>
+        <input
+          name="preview_rounds"
+          type="number"
+          min="1"
+          max="10"
+          value="{{ subscription_preview.ping_rounds if subscription_preview else 1 }}"
+          class="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        />
+      </label>
       <button
         type="submit"
         class="h-10 rounded-md bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-500 sm:col-span-4 sm:justify-self-end"
       >
-        Preview подписки
+        Preview подписки xN
       </button>
     </form>
     {% if subscription_preview %}
@@ -162,6 +185,7 @@
             <form hx-post="/htmx/subscription/add" hx-target="#dashboard-root" hx-swap="innerHTML">
               <input type="hidden" name="url" value="{{ subscription_preview.url }}" />
               <input type="hidden" name="name" value="{{ subscription_preview.name }}" />
+              <input type="hidden" name="preview_rounds" value="{{ subscription_preview.ping_rounds or 1 }}" />
               <button
                 type="submit"
                 class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"

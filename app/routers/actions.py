@@ -264,6 +264,7 @@ async def htmx_add_preview(
     settings: SettingsDep,
     _: None = Depends(require_ui_session_htmx),
     link: str = Form(""),
+    preview_rounds: int = Form(1),
 ):
     st = _store(settings)
     store = st.load()
@@ -281,9 +282,10 @@ async def htmx_add_preview(
             ),
             message_kind="error",
         )
-    ping_stats, ping_err = await _probe_preview_candidates(settings, store, preview["valid"], rounds=1)
+    rounds = max(1, min(10, int(preview_rounds or 1)))
+    ping_stats, ping_err = await _probe_preview_candidates(settings, store, preview["valid"], rounds=rounds)
     preview["ping_stats"] = ping_stats
-    preview["ping_rounds"] = 1
+    preview["ping_rounds"] = rounds
     preview["alive_total"] = sum(1 for st in ping_stats.values() if st.get("alive", 0) > 0)
     preview["checked_total"] = len(ping_stats)
     msg, kind = _manual_preview_message(preview)
@@ -411,6 +413,8 @@ async def _build_subscription_preview(
     store: ProxyStore,
     settings: SettingsDep,
     form: AddSubscriptionForm,
+    *,
+    preview_rounds: int = 1,
 ) -> dict[str, Any]:
     existed = next((s for s in store.subscriptions if s.url == form.url), None)
     snap = await fetch_subscription_snapshot(
@@ -429,12 +433,14 @@ async def _build_subscription_preview(
         }
     )
     candidates = [
-        StoredProxy(uri=v["uri"], proxy_name=v["proxy_name"], source_type="subscription")
+        # Keep as manual in dry-run probe so materialize_subscription_proxies
+        # does not drop preview-only candidates before delay checks.
+        StoredProxy(uri=v["uri"], proxy_name=v["proxy_name"], source_type="manual")
         for v in preview["valid"]
     ]
-    ping_stats, ping_err = await _probe_preview_candidates(settings, store, candidates, rounds=1)
+    ping_stats, ping_err = await _probe_preview_candidates(settings, store, candidates, rounds=preview_rounds)
     preview["ping_stats"] = ping_stats
-    preview["ping_rounds"] = 1
+    preview["ping_rounds"] = preview_rounds
     preview["alive_total"] = sum(1 for st in ping_stats.values() if st.get("alive", 0) > 0)
     preview["checked_total"] = len(ping_stats)
     preview["ping_error"] = ping_err
@@ -448,6 +454,7 @@ async def htmx_subscription_preview(
     _: None = Depends(require_ui_session_htmx),
     url: str = Form(""),
     name: str = Form(""),
+    preview_rounds: int = Form(1),
 ):
     st = _store(settings)
     store = st.load()
@@ -461,7 +468,8 @@ async def htmx_subscription_preview(
             message_kind="error",
         )
     try:
-        preview = await _build_subscription_preview(store, settings, form)
+        rounds = max(1, min(10, int(preview_rounds or 1)))
+        preview = await _build_subscription_preview(store, settings, form, preview_rounds=rounds)
     except SubscriptionFetchError as e:
         return _render_dashboard(
             request,
@@ -489,6 +497,7 @@ async def htmx_subscription_add(
     _: None = Depends(require_ui_session_htmx),
     url: str = Form(""),
     name: str = Form(""),
+    preview_rounds: int = Form(1),
 ):
     st = _store(settings)
     store = st.load()
@@ -503,7 +512,8 @@ async def htmx_subscription_add(
         )
 
     try:
-        preview = await _build_subscription_preview(store, settings, form)
+        rounds = max(1, min(10, int(preview_rounds or 1)))
+        preview = await _build_subscription_preview(store, settings, form, preview_rounds=rounds)
     except SubscriptionFetchError as e:
         return _render_dashboard(
             request,
