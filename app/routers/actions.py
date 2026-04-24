@@ -67,38 +67,11 @@ def _effective_settings(settings: SettingsDep, store: ProxyStore) -> SettingsDep
         updates["auto_filter_max_delay_ms"] = store.ui_auto_filter_max_delay_ms
     if store.ui_auto_filter_source is not None:
         updates["auto_filter_source"] = store.ui_auto_filter_source
+    if store.ui_auto_filter_recheck_interval_sec is not None:
+        updates["auto_filter_recheck_interval_sec"] = store.ui_auto_filter_recheck_interval_sec
     if not updates:
-        # region agent log
-        _dbg(
-            "H21",
-            "app/routers/actions.py:_effective_settings",
-            "effective_settings_no_override",
-            {
-                "env_enabled": settings.auto_filter_enabled,
-                "env_max_delay": settings.auto_filter_max_delay_ms,
-                "env_source": settings.auto_filter_source,
-                "store_enabled": store.ui_auto_filter_enabled,
-                "store_max_delay": store.ui_auto_filter_max_delay_ms,
-                "store_source": store.ui_auto_filter_source,
-            },
-        )
-        # endregion
         return settings
-    effective = settings.model_copy(update=updates)
-    # region agent log
-    _dbg(
-        "H21",
-        "app/routers/actions.py:_effective_settings",
-        "effective_settings_with_override",
-        {
-            "updates": updates,
-            "effective_enabled": effective.auto_filter_enabled,
-            "effective_max_delay": effective.auto_filter_max_delay_ms,
-            "effective_source": effective.auto_filter_source,
-        },
-    )
-    # endregion
-    return effective
+    return settings.model_copy(update=updates)
 
 
 def _extract_mihomo_delay_map(payload: dict[str, Any]) -> dict[str, int | None]:
@@ -190,6 +163,7 @@ async def htmx_add(
                 ui_auto_filter_enabled=store.ui_auto_filter_enabled,
                 ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
                 ui_auto_filter_source=store.ui_auto_filter_source,
+                ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
             )
             added += 1
             log.info("  строка %d: добавлен узел «%s»", idx, name)
@@ -251,6 +225,7 @@ async def htmx_subscription_add(
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
+            ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
         )
     else:
         store = ProxyStore(
@@ -262,6 +237,7 @@ async def htmx_subscription_add(
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
+            ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
         )
     updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
     st.save(updated)
@@ -329,6 +305,7 @@ async def htmx_subscription_delete(
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
     )
     if len(store.subscriptions) == before:
         return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
@@ -436,6 +413,7 @@ async def htmx_auto_filter_config(
     enabled: str = Form(""),
     max_delay_ms: int = Form(1500),
     source: str = Form("hybrid"),
+    recheck_interval_sec: int = Form(300),
 ):
     st = _store(settings)
     store = st.load()
@@ -444,9 +422,11 @@ async def htmx_auto_filter_config(
     src = (source or "hybrid").strip().lower()
     if src not in {"delay", "mihomo", "hybrid"}:
         src = "hybrid"
+    recheck_interval = max(30, min(86400, int(recheck_interval_sec or 300)))
     store.ui_auto_filter_enabled = is_enabled
     store.ui_auto_filter_max_delay_ms = max_delay
     store.ui_auto_filter_source = src
+    store.ui_auto_filter_recheck_interval_sec = recheck_interval
     _dbg(
         "H11",
         "app/routers/actions.py:htmx_auto_filter_config",
@@ -458,6 +438,7 @@ async def htmx_auto_filter_config(
             "store_value_enabled": store.ui_auto_filter_enabled,
             "store_value_max_delay_ms": store.ui_auto_filter_max_delay_ms,
             "store_value_source": store.ui_auto_filter_source,
+            "store_value_recheck_interval_sec": store.ui_auto_filter_recheck_interval_sec,
         },
     )
     if not is_enabled:
@@ -465,7 +446,10 @@ async def htmx_auto_filter_config(
             s.auto_excluded_uris = []
     updated, err = await persist_and_reload(settings, store, refresh_subscriptions=False)
     st.save(updated)
-    msg = f"Auto-filter {'включен' if is_enabled else 'выключен'}, порог {max_delay} ms, source={src}."
+    msg = (
+        f"Auto-filter {'включен' if is_enabled else 'выключен'}, порог {max_delay} ms, "
+        f"source={src}, recheck={recheck_interval}s."
+    )
     if err:
         msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
     return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
@@ -487,6 +471,7 @@ async def htmx_delete(
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
     )
     st.save(store)
     updated, err = await persist_and_reload(settings, store)
@@ -667,6 +652,7 @@ async def htmx_test_all(
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
+            ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
         )
         _dbg(
             "H12",

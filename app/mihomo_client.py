@@ -28,14 +28,6 @@ class MihomoClient:
         self._timeout = httpx.Timeout(30.0, connect=5.0)
 
     def _headers(self) -> dict[str, str]:
-        # region agent log
-        self._dbg(
-            "H14",
-            "app/mihomo_client.py:_headers",
-            "build_headers",
-            {"has_secret": bool(self._secret and self._secret.strip())},
-        )
-        # endregion
         secret = (self._secret or "").strip()
         if not secret:
             return {}

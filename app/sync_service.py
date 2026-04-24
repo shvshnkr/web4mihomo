@@ -104,6 +104,7 @@ def hydrate_store_from_provider_yaml(store: ProxyStore, settings: Settings) -> P
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
     )
 
 
@@ -215,6 +216,7 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
     )
     _dbg(
         "H3",
@@ -361,6 +363,7 @@ def apply_auto_filter_policy(
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
     )
     _dbg(
         "H9",
