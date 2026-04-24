@@ -217,6 +217,47 @@
   </section>
 
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
+    <h2 class="text-lg font-medium text-slate-100">Auto-filter LB</h2>
+    <p class="mt-1 text-sm text-slate-400">
+      Управление фильтрацией подписочных узлов для LB-провайдера.
+    </p>
+    <form
+      class="mt-4 flex flex-wrap items-end gap-3"
+      hx-post="/htmx/auto-filter/config"
+      hx-target="#dashboard-root"
+      hx-swap="innerHTML"
+    >
+      <label class="inline-flex items-center gap-2 text-sm text-slate-300">
+        <input
+          name="enabled"
+          type="checkbox"
+          value="on"
+          class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-600 focus:ring-emerald-500/40"
+          {% if settings.auto_filter_enabled %}checked{% endif %}
+        />
+        Включить auto-filter
+      </label>
+      <label class="flex items-center gap-2 text-sm text-slate-300">
+        <span>Порог задержки (ms)</span>
+        <input
+          name="max_delay_ms"
+          type="number"
+          min="100"
+          max="120000"
+          value="{{ settings.auto_filter_max_delay_ms }}"
+          class="h-10 w-28 rounded-md border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        />
+      </label>
+      <button
+        type="submit"
+        class="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500"
+      >
+        Сохранить
+      </button>
+    </form>
+  </section>
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-lg font-medium text-slate-100">Текущие прокси</h2>
       <div class="flex flex-wrap items-center gap-2">

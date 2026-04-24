@@ -53,6 +53,17 @@ def _norm_uri(uri: str) -> str:
     return (uri or "").strip()
 
 
+def _effective_settings(settings: SettingsDep, store: ProxyStore) -> SettingsDep:
+    updates: dict[str, object] = {}
+    if store.ui_auto_filter_enabled is not None:
+        updates["auto_filter_enabled"] = store.ui_auto_filter_enabled
+    if store.ui_auto_filter_max_delay_ms is not None:
+        updates["auto_filter_max_delay_ms"] = store.ui_auto_filter_max_delay_ms
+    if not updates:
+        return settings
+    return settings.model_copy(update=updates)
+
+
 def _render_dashboard(
     request: Request,
     settings: SettingsDep,
@@ -61,12 +72,13 @@ def _render_dashboard(
     message: str | None = None,
     message_kind: str = "info",
 ) -> HTMLResponse:
+    effective_settings = _effective_settings(settings, store)
     return templates.TemplateResponse(
         request,
         "partials/dashboard.html",
         {
             "request": request,
-            "settings": settings,
+            "settings": effective_settings,
             "store": store,
             "message": message,
             "message_kind": message_kind,
@@ -335,6 +347,31 @@ async def htmx_subscription_restore_auto(
     return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
 
 
+@router.post("/auto-filter/config", response_class=HTMLResponse)
+async def htmx_auto_filter_config(
+    request: Request,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+    enabled: str = Form(""),
+    max_delay_ms: int = Form(1500),
+):
+    st = _store(settings)
+    store = st.load()
+    is_enabled = str(enabled).lower() in {"1", "true", "on", "yes"}
+    max_delay = max(100, min(120000, int(max_delay_ms or 1500)))
+    store.ui_auto_filter_enabled = is_enabled
+    store.ui_auto_filter_max_delay_ms = max_delay
+    if not is_enabled:
+        for s in store.subscriptions:
+            s.auto_excluded_uris = []
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=False)
+    st.save(updated)
+    msg = f"Auto-filter {'включен' if is_enabled else 'выключен'}, порог {max_delay} ms."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
 @router.delete("/proxy/{proxy_id}", response_class=HTMLResponse)
 async def htmx_delete(
     request: Request,
@@ -500,7 +537,12 @@ async def htmx_test_all(
 
     client = MihomoClient(settings)
     sem = asyncio.Semaphore(settings.test_all_concurrency)
-    test_url = settings.auto_filter_probe_url if settings.auto_filter_enabled else settings.delay_test_url
+    effective_settings = _effective_settings(settings, store)
+    test_url = (
+        effective_settings.auto_filter_probe_url
+        if effective_settings.auto_filter_enabled
+        else effective_settings.delay_test_url
+    )
     _dbg(
         "H4",
         "app/routers/actions.py:htmx_test_all",
@@ -514,8 +556,8 @@ async def htmx_test_all(
                 ms = await client.proxy_delay_ms(
                     p.proxy_name,
                     test_url=test_url,
-                    timeout_ms=settings.delay_timeout_ms,
-                    expected=settings.delay_test_expected,
+                    timeout_ms=effective_settings.delay_timeout_ms,
+                    expected=effective_settings.delay_test_expected,
                 )
                 p.last_delay_ms = ms
                 p.last_delay_error = None
@@ -543,7 +585,7 @@ async def htmx_test_all(
             "total": len(store.proxies),
         },
     )
-    store = apply_auto_filter_policy(store, settings)
+    store = apply_auto_filter_policy(store, effective_settings)
     _dbg(
         "H10",
         "app/routers/actions.py:htmx_test_all",
@@ -554,12 +596,12 @@ async def htmx_test_all(
             "proxies_total": len(store.proxies),
         },
     )
-    updated, err = await persist_and_reload(settings, store)
+    updated, err = await persist_and_reload(effective_settings, store)
     st.save(updated)
     log.info("POST /htmx/test-all: завершено для %d узлов", len(store.proxies))
     auto_excluded = sum(len(s.auto_excluded_uris) for s in updated.subscriptions)
     msg = "Проверка задержек завершена."
-    if settings.auto_filter_enabled:
+    if effective_settings.auto_filter_enabled:
         msg += f" Auto-excluded: {auto_excluded}."
     if err:
         msg += f"\n\nmihomo не перезагрузил провайдер: {err}"

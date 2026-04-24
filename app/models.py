@@ -81,6 +81,8 @@ class ProxyStore(BaseModel):
 
     proxies: list[StoredProxy] = Field(default_factory=list)
     subscriptions: list[StoredSubscription] = Field(default_factory=list)
+    ui_auto_filter_enabled: bool | None = None
+    ui_auto_filter_max_delay_ms: int | None = Field(default=None, ge=100, le=120000)
 
 
 class AddProxyForm(BaseModel):
@@ -102,6 +104,11 @@ class AddSubscriptionForm(BaseModel):
     @classmethod
     def from_form(cls, url: str, name: str) -> "AddSubscriptionForm":
         return cls(url=(url or "").strip(), name=(name or "").strip())
+
+
+class AutoFilterForm(BaseModel):
+    enabled: bool = False
+    max_delay_ms: int = Field(default=1500, ge=100, le=120000)
 
 
 class LoginForm(BaseModel):
