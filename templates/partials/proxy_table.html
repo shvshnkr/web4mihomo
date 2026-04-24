@@ -34,6 +34,10 @@
           <td class="px-2 py-2 text-xs">
             {% if p.last_delay_ms is not none %}
               <span class="text-emerald-300">{{ p.last_delay_ms }} ms</span>
+            {% elif p.last_delay_error %}
+              <span class="text-red-300" title="{{ p.last_delay_error }}">
+                {% if "ReadTimeout" in p.last_delay_error %}timeout{% else %}n/a{% endif %}
+              </span>
             {% else %}
               <span class="text-slate-500">—</span>
             {% endif %}

@@ -432,6 +432,7 @@ async def htmx_delay_one(
             expected=settings.delay_test_expected,
         )
         _patch_delay_ms(store, proxy_id, ms)
+        _patch_delay_error(store, proxy_id, None)
         st.save(store)
         return _render_dashboard(
             request,
@@ -448,6 +449,7 @@ async def htmx_delay_one(
             {"proxy_id": proxy_id, "error": str(e)},
         )
         _patch_delay_ms(store, proxy_id, None)
+        _patch_delay_error(store, proxy_id, str(e))
         st.save(store)
         return _render_dashboard(
             request,
@@ -470,6 +472,12 @@ def _patch_delay_ms(store: ProxyStore, proxy_id: str, ms: int | None) -> None:
     for p in store.proxies:
         if p.id == proxy_id:
             p.last_delay_ms = ms
+
+
+def _patch_delay_error(store: ProxyStore, proxy_id: str, err: str | None) -> None:
+    for p in store.proxies:
+        if p.id == proxy_id:
+            p.last_delay_error = err
 
 
 @router.post("/test-all", response_class=HTMLResponse)
@@ -510,10 +518,10 @@ async def htmx_test_all(
                     expected=settings.delay_test_expected,
                 )
                 p.last_delay_ms = ms
-                p.last_sync_error = None
+                p.last_delay_error = None
             except MihomoAPIError:
                 p.last_delay_ms = None
-                p.last_sync_error = "Delay failed"
+                p.last_delay_error = "Delay failed"
             except Exception as e:
                 _dbg(
                     "H4",
@@ -522,7 +530,7 @@ async def htmx_test_all(
                     {"proxy_name": p.proxy_name, "exc_type": type(e).__name__, "exc": str(e)},
                 )
                 p.last_delay_ms = None
-                p.last_sync_error = f"Delay error: {type(e).__name__}"
+                p.last_delay_error = f"Delay error: {type(e).__name__}"
 
     await asyncio.gather(*(one(p) for p in store.proxies))
     _dbg(
@@ -531,7 +539,7 @@ async def htmx_test_all(
         "test_all_after_gather",
         {
             "with_delay": sum(1 for p in store.proxies if p.last_delay_ms is not None),
-            "with_error": sum(1 for p in store.proxies if p.last_sync_error),
+            "with_error": sum(1 for p in store.proxies if p.last_delay_error),
             "total": len(store.proxies),
         },
     )

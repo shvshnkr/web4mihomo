@@ -20,6 +20,7 @@ class StoredProxy(BaseModel):
         description="Сырой dict узла из YAML провайдера (если нет vless://).",
     )
     last_delay_ms: int | None = None
+    last_delay_error: str | None = None
     last_sync_error: str | None = None
     source_type: str = Field(
         default="manual",
