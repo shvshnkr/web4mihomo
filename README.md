@@ -4,7 +4,7 @@
 
 ## Возможности
 
-- Вставка одной или **нескольких** ссылок `vless://` и `trojan://` (по одной на строку; строки с `#` в начале — комментарии).
+- Вставка одной или **нескольких** ссылок `vless://`, `trojan://`, `hysteria2://` и `hysteria://` (по одной на строку; строки с `#` в начале — комментарии).
 - Подписки по URL (JSON `links`, plain text URI list, base64 URI list).
 - Парсинг Reality (`pbk`, `sid`, `fp`, `sni`, …), транспорты tcp/ws/grpc/http/h2/xhttp, `flow`, `packet-encoding`.
 - Запись двух YAML для `proxy-providers` типа `file`:

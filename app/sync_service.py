@@ -167,7 +167,12 @@ def _build_subscription_proxies(
         if not u or u in excluded or u in seen_uris:
             continue
         low = u.lower()
-        if not (low.startswith("vless://") or low.startswith("trojan://")):
+        if not (
+            low.startswith("vless://")
+            or low.startswith("trojan://")
+            or low.startswith("hysteria2://")
+            or low.startswith("hysteria://")
+        ):
             continue
         seen_uris.add(u)
         try:

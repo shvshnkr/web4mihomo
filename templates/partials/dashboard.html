@@ -10,7 +10,9 @@
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
     <h2 class="text-lg font-medium text-slate-100">Добавить прокси</h2>
     <p class="mt-1 text-sm text-slate-400">
-      Вставьте одну или несколько ссылок <code class="text-slate-300">vless://</code> или <code class="text-slate-300">trojan://</code> (не подписку) — по
+      Вставьте одну или несколько ссылок <code class="text-slate-300">vless://</code>,
+      <code class="text-slate-300">trojan://</code>, <code class="text-slate-300">hysteria2://</code> или
+      <code class="text-slate-300">hysteria://</code> (не подписку) — по
       <strong>одной на строку</strong>. Строки с <code class="text-slate-400">#</code> в начале считаются комментарием.
     </p>
     <form
@@ -24,7 +26,7 @@
         <textarea
           name="link"
           rows="8"
-          placeholder="vless://...&#10;trojan://..."
+          placeholder="vless://...&#10;trojan://...&#10;hysteria2://..."
           class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
         ></textarea>
       </label>

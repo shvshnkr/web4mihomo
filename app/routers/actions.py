@@ -140,7 +140,10 @@ async def htmx_add(
             request,
             settings,
             store,
-            message="Вставьте хотя бы одну строку с vless:// или trojan:// (можно несколько, по одной на строку).",
+            message=(
+                "Вставьте хотя бы одну строку с vless://, trojan://, "
+                "hysteria2:// или hysteria:// (можно несколько, по одной на строку)."
+            ),
             message_kind="error",
         )
 
@@ -149,8 +152,13 @@ async def htmx_add(
     for idx, line in enumerate(lines, start=1):
         log.debug("  строка %d: начало разбора (первые 72 символа): %r", idx, line[:72])
         low = line.lower()
-        if not (low.startswith("vless://") or low.startswith("trojan://")):
-            errors.append(f"Строка {idx}: не vless:// и не trojan:// — пропуск.")
+        if not (
+            low.startswith("vless://")
+            or low.startswith("trojan://")
+            or low.startswith("hysteria2://")
+            or low.startswith("hysteria://")
+        ):
+            errors.append(f"Строка {idx}: неподдерживаемая схема URI — пропуск.")
             continue
         try:
             base_name = suggest_proxy_name_from_uri(line)
