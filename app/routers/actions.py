@@ -536,6 +536,16 @@ async def htmx_test_all(
         },
     )
     store = apply_auto_filter_policy(store, settings)
+    _dbg(
+        "H10",
+        "app/routers/actions.py:htmx_test_all",
+        "test_all_after_auto_filter",
+        {
+            "auto_excluded_total": sum(len(s.auto_excluded_uris) for s in store.subscriptions),
+            "manual_excluded_total": sum(len(s.excluded_uris) for s in store.subscriptions),
+            "proxies_total": len(store.proxies),
+        },
+    )
     updated, err = await persist_and_reload(settings, store)
     st.save(updated)
     log.info("POST /htmx/test-all: завершено для %d узлов", len(store.proxies))

@@ -220,7 +220,25 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
 
 def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStore:
     """Update auto-excluded URIs using latest Delay-all results."""
+    _dbg(
+        "H9",
+        "app/sync_service.py:apply_auto_filter_policy",
+        "auto_filter_start",
+        {
+            "enabled": settings.auto_filter_enabled,
+            "max_delay_ms": settings.auto_filter_max_delay_ms,
+            "fail_streak_threshold": settings.auto_filter_fail_streak,
+            "proxies_total": len(store.proxies),
+            "subscriptions_total": len(store.subscriptions),
+        },
+    )
     if not settings.auto_filter_enabled:
+        _dbg(
+            "H9",
+            "app/sync_service.py:apply_auto_filter_policy",
+            "auto_filter_skipped_disabled",
+            {},
+        )
         return store
 
     now = datetime.now(timezone.utc).isoformat()
@@ -265,7 +283,18 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
                 auto_excluded.discard(uri)
         sub.auto_excluded_uris = sorted(auto_excluded)
 
-    return ProxyStore(proxies=store.proxies, subscriptions=updated_subs)
+    result = ProxyStore(proxies=store.proxies, subscriptions=updated_subs)
+    _dbg(
+        "H9",
+        "app/sync_service.py:apply_auto_filter_policy",
+        "auto_filter_done",
+        {
+            "tracked_nodes": sum(len(s.node_stats) for s in updated_subs),
+            "auto_excluded_total": sum(len(s.auto_excluded_uris) for s in updated_subs),
+            "manual_excluded_total": sum(len(s.excluded_uris) for s in updated_subs),
+        },
+    )
+    return result
 
 
 def write_provider_file(path: Path, proxies: list[dict[str, Any]]) -> None:
