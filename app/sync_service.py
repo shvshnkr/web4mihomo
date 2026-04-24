@@ -146,12 +146,13 @@ def _build_subscription_proxies(
     built: list[StoredProxy] = []
     seen_uris: set[str] = set()
     excluded: set[str] = set()
+    manual_excluded = {u.strip() for u in sub.excluded_uris if u and u.strip()}
+    auto_excluded = {u.strip() for u in sub.auto_excluded_uris if u and u.strip()}
+    # Manual excludes are sticky and must never return in either provider.
+    excluded |= manual_excluded
+    # Auto excludes apply only to the LB provider.
     if apply_excludes:
-        excluded = {
-            u.strip()
-            for u in [*sub.excluded_uris, *sub.auto_excluded_uris]
-            if u and u.strip()
-        }
+        excluded |= auto_excluded
     parse_errors = 0
     for uri in sub.links:
         u = uri.strip()
@@ -313,6 +314,12 @@ async def persist_and_reload(
         },
     )
     store = hydrate_store_from_provider_yaml(store, settings)
+    prev_delay_by_id = {p.id: p.last_delay_ms for p in store.proxies}
+    prev_error_by_id = {p.id: p.last_sync_error for p in store.proxies}
+    prev_sub_state_by_uri: dict[tuple[str, str], tuple[int | None, str | None]] = {}
+    for p in store.proxies:
+        if p.source_type == "subscription" and p.subscription_id and p.uri:
+            prev_sub_state_by_uri[(p.subscription_id, p.uri.strip())] = (p.last_delay_ms, p.last_sync_error)
     store_full = materialize_subscription_proxies(store, apply_excludes=False)
     store_lb = materialize_subscription_proxies(store, apply_excludes=True)
     manual_excluded = {
@@ -367,6 +374,16 @@ async def persist_and_reload(
 
     sync_error: str | None = None
     updated = store_lb.model_copy(deep=True)
+    for p in updated.proxies:
+        if p.source_type == "subscription" and p.subscription_id and p.uri:
+            state = prev_sub_state_by_uri.get((p.subscription_id, p.uri.strip()))
+            if state is not None:
+                p.last_delay_ms, p.last_sync_error = state
+        else:
+            if p.id in prev_delay_by_id:
+                p.last_delay_ms = prev_delay_by_id[p.id]
+            if p.id in prev_error_by_id and prev_error_by_id[p.id]:
+                p.last_sync_error = prev_error_by_id[p.id]
     errors: list[str] = []
 
     try:
@@ -392,9 +409,6 @@ async def persist_and_reload(
         sync_error = " | ".join(errors)
         for p in updated.proxies:
             p.last_sync_error = sync_error
-    else:
-        for p in updated.proxies:
-            p.last_sync_error = None
     _dbg(
         "H7",
         "app/sync_service.py:persist_and_reload",
