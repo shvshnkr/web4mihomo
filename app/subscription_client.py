@@ -24,6 +24,27 @@ class SubscriptionSnapshot:
     subscription_url: str | None
 
 
+def _parse_snapshot_from_text(text: str, fallback_url: str) -> SubscriptionSnapshot | None:
+    data = _try_parse_json(text)
+    if isinstance(data, dict):
+        links = _links_from_json_dict(data)
+        if links:
+            user = _parse_user(data.get("user"))
+            sub_url = data.get("subscriptionUrl")
+            if not isinstance(sub_url, str):
+                sub_url = None
+            return SubscriptionSnapshot(links=links, user=user, subscription_url=sub_url)
+
+    links = links_from_text(text)
+    if links:
+        return SubscriptionSnapshot(links=links, user=None, subscription_url=fallback_url)
+
+    decoded_links = links_from_base64_text(text)
+    if decoded_links:
+        return SubscriptionSnapshot(links=decoded_links, user=None, subscription_url=fallback_url)
+    return None
+
+
 def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
     # region agent log
     try:
@@ -49,37 +70,61 @@ async def fetch_subscription_snapshot(
     timeout_s: float = 20.0,
 ) -> SubscriptionSnapshot:
     """Fetch and parse subscription response as JSON or plain URI list."""
-    try:
-        _dbg(
-            "H1",
-            "app/subscription_client.py:fetch_subscription_snapshot",
-            "subscription_fetch_start",
-            {"url": url, "timeout_s": timeout_s},
-        )
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/json,text/plain,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-        }
+    _dbg(
+        "H1",
+        "app/subscription_client.py:fetch_subscription_snapshot",
+        "subscription_fetch_start",
+        {"url": url, "timeout_s": timeout_s},
+    )
+    profiles: list[tuple[str, dict[str, str]]] = [
+        (
+            "browser",
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/json,text/plain,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
+        ),
+        (
+            "bot",
+            {
+                "User-Agent": "python-httpx/0.27",
+                "Accept": "*/*",
+            },
+        ),
+        (
+            "curl",
+            {
+                "User-Agent": "curl/8.5.0",
+                "Accept": "*/*",
+            },
+        ),
+    ]
+    last_http_error: str | None = None
+    payload_probe_hits: list[dict[str, Any]] = []
+
+    for profile_name, headers in profiles:
         _dbg(
             "H5",
             "app/subscription_client.py:fetch_subscription_snapshot",
             "subscription_fetch_headers_profile",
-            {"ua_prefix": headers["User-Agent"][:32], "accept": headers["Accept"]},
+            {"profile": profile_name, "ua_prefix": headers.get("User-Agent", "")[:32], "accept": headers.get("Accept")},
         )
-        async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True, headers=headers) as client:
-            resp = await client.get(url)
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True, headers=headers) as client:
+                resp = await client.get(url)
             _dbg(
                 "H2",
                 "app/subscription_client.py:fetch_subscription_snapshot",
                 "subscription_fetch_response",
                 {
+                    "profile": profile_name,
                     "request_url": url,
                     "final_url": str(resp.url),
                     "status_code": resp.status_code,
@@ -91,63 +136,54 @@ async def fetch_subscription_snapshot(
                 },
             )
             resp.raise_for_status()
-    except httpx.HTTPError as e:
-        status_code = None
-        response_url = None
-        response_content_type = None
-        body_prefix = None
-        if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
-            status_code = e.response.status_code
-            response_url = str(e.response.url)
-            response_content_type = e.response.headers.get("content-type")
-            body_prefix = (e.response.text or "")[:240]
-        _dbg(
-            "H3",
-            "app/subscription_client.py:fetch_subscription_snapshot",
-            "subscription_fetch_http_error",
-            {
-                "request_url": url,
-                "exc_type": type(e).__name__,
-                "status_code": status_code,
-                "response_url": response_url,
-                "response_content_type": response_content_type,
-                "body_prefix": body_prefix,
-            },
-        )
-        raise SubscriptionFetchError(f"Не удалось загрузить подписку: {e}") from e
+            text = resp.text or ""
+            text_links = links_from_text(text)
+            b64_links = links_from_base64_text(text)
+            json_like = _try_parse_json(text)
+            probe = {
+                "profile": profile_name,
+                "json_detected": isinstance(json_like, dict),
+                "text_links_count": len(text_links),
+                "base64_links_count": len(b64_links),
+            }
+            payload_probe_hits.append(probe)
+            _dbg(
+                "H4",
+                "app/subscription_client.py:fetch_subscription_snapshot",
+                "subscription_payload_probe",
+                probe,
+            )
+            parsed = _parse_snapshot_from_text(text, str(resp.url))
+            if parsed is not None:
+                return parsed
+        except httpx.HTTPError as e:
+            status_code = None
+            response_url = None
+            response_content_type = None
+            body_prefix = None
+            if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
+                status_code = e.response.status_code
+                response_url = str(e.response.url)
+                response_content_type = e.response.headers.get("content-type")
+                body_prefix = (e.response.text or "")[:240]
+            last_http_error = str(e)
+            _dbg(
+                "H3",
+                "app/subscription_client.py:fetch_subscription_snapshot",
+                "subscription_fetch_http_error",
+                {
+                    "profile": profile_name,
+                    "request_url": url,
+                    "exc_type": type(e).__name__,
+                    "status_code": status_code,
+                    "response_url": response_url,
+                    "response_content_type": response_content_type,
+                    "body_prefix": body_prefix,
+                },
+            )
 
-    text = resp.text or ""
-    text_links = links_from_text(text)
-    b64_links = links_from_base64_text(text)
-    json_like = _try_parse_json(text)
-    _dbg(
-        "H4",
-        "app/subscription_client.py:fetch_subscription_snapshot",
-        "subscription_payload_probe",
-        {
-            "request_url": url,
-            "json_detected": isinstance(json_like, dict),
-            "text_links_count": len(text_links),
-            "base64_links_count": len(b64_links),
-        },
-    )
-    data = json_like
-    if isinstance(data, dict):
-        links = _links_from_json_dict(data)
-        if links:
-            user = _parse_user(data.get("user"))
-            sub_url = data.get("subscriptionUrl")
-            if not isinstance(sub_url, str):
-                sub_url = None
-            return SubscriptionSnapshot(links=links, user=user, subscription_url=sub_url)
-
-    links = links_from_text(text)
-    if links:
-        return SubscriptionSnapshot(links=links, user=None, subscription_url=url)
-
-    decoded_links = links_from_base64_text(text)
-    if decoded_links:
-        return SubscriptionSnapshot(links=decoded_links, user=None, subscription_url=url)
+    if last_http_error and not payload_probe_hits:
+        raise SubscriptionFetchError(f"Не удалось загрузить подписку: {last_http_error}")
 
     raise SubscriptionFetchError(
         "Подписка не распознана: ожидается JSON с links, текстовый список URI или base64-представление."
