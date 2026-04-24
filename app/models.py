@@ -63,6 +63,10 @@ class StoredSubscription(BaseModel):
     name: str = Field(default="")
     url: str = Field(..., description="Subscription endpoint URL.")
     enabled: bool = Field(default=True)
+    request_profile: str | None = Field(
+        default=None,
+        description="Pinned request profile used to fetch this subscription.",
+    )
     links: list[str] = Field(default_factory=list)
     excluded_uris: list[str] = Field(
         default_factory=list,

@@ -237,6 +237,9 @@
                 {% if s.last_refresh_at %}
                   <div class="text-[10px] text-slate-500">updated: {{ s.last_refresh_at }}</div>
                 {% endif %}
+                {% if s.request_profile %}
+                  <div class="text-[10px] text-slate-500">profile: {{ s.request_profile }}</div>
+                {% endif %}
                 {% if s.excluded_uris %}
                   <div class="text-[10px] text-amber-300">excluded: {{ s.excluded_uris|length }}</div>
                 {% endif %}

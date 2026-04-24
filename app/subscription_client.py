@@ -22,6 +22,7 @@ class SubscriptionSnapshot:
     links: list[str]
     user: SubscriptionUser | None
     subscription_url: str | None
+    request_profile: str | None = None
 
 
 def _parse_snapshot_from_text(text: str, fallback_url: str) -> SubscriptionSnapshot | None:
@@ -68,6 +69,7 @@ async def fetch_subscription_snapshot(
     url: str,
     *,
     timeout_s: float = 20.0,
+    preferred_profile: str | None = None,
 ) -> SubscriptionSnapshot:
     """Fetch and parse subscription response as JSON or plain URI list."""
     _dbg(
@@ -106,6 +108,11 @@ async def fetch_subscription_snapshot(
             },
         ),
     ]
+    if preferred_profile:
+        idx = next((i for i, (name, _) in enumerate(profiles) if name == preferred_profile), None)
+        if idx is not None:
+            preferred = profiles.pop(idx)
+            profiles.insert(0, preferred)
     last_http_error: str | None = None
     payload_probe_hits: list[dict[str, Any]] = []
 
@@ -155,6 +162,7 @@ async def fetch_subscription_snapshot(
             )
             parsed = _parse_snapshot_from_text(text, str(resp.url))
             if parsed is not None:
+                parsed.request_profile = profile_name
                 return parsed
         except httpx.HTTPError as e:
             status_code = None

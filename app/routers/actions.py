@@ -412,9 +412,11 @@ async def _build_subscription_preview(
     settings: SettingsDep,
     form: AddSubscriptionForm,
 ) -> dict[str, Any]:
+    existed = next((s for s in store.subscriptions if s.url == form.url), None)
     snap = await fetch_subscription_snapshot(
         form.url,
         timeout_s=settings.subscriptions_fetch_timeout_sec,
+        preferred_profile=existed.request_profile if existed else None,
     )
     preview = _preview_subscription_links(store, snap.links)
     preview.update(
@@ -423,6 +425,7 @@ async def _build_subscription_preview(
             "name": form.name,
             "subscription_url": snap.subscription_url or form.url,
             "user": snap.user,
+            "request_profile": snap.request_profile,
         }
     )
     candidates = [
@@ -530,6 +533,7 @@ async def htmx_subscription_add(
         if form.name:
             updated_sub.name = form.name
         updated_sub.url = effective_url
+        updated_sub.request_profile = preview.get("request_profile") or updated_sub.request_profile
         updated_sub.links = [v["uri"] for v in preview["valid"]]
         updated_sub.user = preview.get("user")
         updated_sub.last_error = None
@@ -541,6 +545,7 @@ async def htmx_subscription_add(
             StoredSubscription(
                 url=effective_url,
                 name=form.name,
+                request_profile=preview.get("request_profile"),
                 links=[v["uri"] for v in preview["valid"]],
                 user=preview.get("user"),
                 last_refresh_at=now,

@@ -132,9 +132,11 @@ async def refresh_enabled_subscriptions(store: ProxyStore, settings: Settings) -
             snap = await fetch_subscription_snapshot(
                 sub.url,
                 timeout_s=settings.subscriptions_fetch_timeout_sec,
+                preferred_profile=sub.request_profile,
             )
             sub.links = snap.links
             sub.user = snap.user
+            sub.request_profile = snap.request_profile or sub.request_profile
             if snap.subscription_url:
                 sub.url = snap.subscription_url
             sub.last_error = None
