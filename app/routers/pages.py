@@ -30,6 +30,19 @@ def _store(settings: SettingsDep) -> StoreJson:
     return StoreJson(settings.json_store_path)
 
 
+def _effective_settings(settings: SettingsDep, store) -> SettingsDep:
+    updates: dict[str, object] = {}
+    if store.ui_auto_filter_enabled is not None:
+        updates["auto_filter_enabled"] = store.ui_auto_filter_enabled
+    if store.ui_auto_filter_max_delay_ms is not None:
+        updates["auto_filter_max_delay_ms"] = store.ui_auto_filter_max_delay_ms
+    if getattr(store, "ui_auto_filter_source", None) is not None:
+        updates["auto_filter_source"] = store.ui_auto_filter_source
+    if not updates:
+        return settings
+    return settings.model_copy(update=updates)
+
+
 def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
     # region agent log
     try:
@@ -57,6 +70,7 @@ async def index(request: Request, settings: SettingsDep):
             status_code=status.HTTP_303_SEE_OTHER,
         )
     store = _store(settings).load()
+    effective_settings = _effective_settings(settings, store)
     # region agent log
     _dbg(
         "H20",
@@ -69,6 +83,9 @@ async def index(request: Request, settings: SettingsDep):
             "store_enabled": store.ui_auto_filter_enabled,
             "store_max_delay": store.ui_auto_filter_max_delay_ms,
             "store_source": store.ui_auto_filter_source,
+            "effective_enabled": effective_settings.auto_filter_enabled,
+            "effective_max_delay": effective_settings.auto_filter_max_delay_ms,
+            "effective_source": effective_settings.auto_filter_source,
         },
     )
     # endregion
@@ -77,7 +94,7 @@ async def index(request: Request, settings: SettingsDep):
         "index.html",
         {
             "request": request,
-            "settings": settings,
+            "settings": effective_settings,
             "store": store,
         },
     )
