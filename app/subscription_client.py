@@ -47,11 +47,11 @@ async def fetch_subscription_snapshot(
                 sub_url = None
             return SubscriptionSnapshot(links=links, user=user, subscription_url=sub_url)
 
-    links = _links_from_text(text)
+    links = links_from_text(text)
     if links:
         return SubscriptionSnapshot(links=links, user=None, subscription_url=url)
 
-    decoded_links = _links_from_base64_text(text)
+    decoded_links = links_from_base64_text(text)
     if decoded_links:
         return SubscriptionSnapshot(links=decoded_links, user=None, subscription_url=url)
 
@@ -88,7 +88,8 @@ def _links_from_json_dict(data: dict[str, Any]) -> list[str]:
     return [v.strip() for v in links_raw if isinstance(v, str) and v.strip()]
 
 
-def _links_from_text(text: str) -> list[str]:
+def links_from_text(text: str) -> list[str]:
+    """Extract URI-looking lines from plain text."""
     links: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -99,7 +100,8 @@ def _links_from_text(text: str) -> list[str]:
     return links
 
 
-def _links_from_base64_text(text: str) -> list[str]:
+def links_from_base64_text(text: str) -> list[str]:
+    """Decode a base64 subscription blob and extract URI-looking lines."""
     compact = "".join(text.split())
     if not compact:
         return []
@@ -108,4 +110,4 @@ def _links_from_base64_text(text: str) -> list[str]:
         decoded = base64.b64decode(padded, validate=False).decode("utf-8", errors="ignore")
     except Exception:
         return []
-    return _links_from_text(decoded)
+    return links_from_text(decoded)

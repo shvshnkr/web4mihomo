@@ -14,12 +14,14 @@ from fastapi.templating import Jinja2Templates
 from app.deps import SettingsDep, require_ui_session_htmx
 from app.mihomo_client import MihomoAPIError, MihomoClient
 from app.models import AddProxyForm, AddSubscriptionForm, ProxyStore, StoredProxy, StoredSubscription
-from app.uri_to_proxy import build_proxy_dict_from_uri, suggest_proxy_name_from_uri
+from app.subscription_client import SubscriptionFetchError, fetch_subscription_snapshot
+from app.uri_to_proxy import build_proxy_dict_from_uri, scheme_of, suggest_proxy_name_from_uri
 from app.store_json import StoreJson
 from app.sync_service import (
     apply_auto_filter_policy,
     materialize_subscription_proxies,
     persist_and_reload,
+    unique_proxy_name,
     unique_proxy_name_from_store,
 )
 from app.vless_bulk import split_bulk_vless_lines
@@ -107,6 +109,8 @@ def _render_dashboard(
     *,
     message: str | None = None,
     message_kind: str = "info",
+    manual_preview: dict[str, Any] | None = None,
+    subscription_preview: dict[str, Any] | None = None,
 ) -> HTMLResponse:
     effective_settings = _effective_settings(settings, store)
     return templates.TemplateResponse(
@@ -118,10 +122,114 @@ def _render_dashboard(
             "store": store,
             "message": message,
             "message_kind": message_kind,
+            "manual_preview": manual_preview,
+            "subscription_preview": subscription_preview,
         },
     )
 
 
+def _store_with_proxy(store: ProxyStore, item: StoredProxy) -> ProxyStore:
+    return ProxyStore(
+        proxies=[*store.proxies, item],
+        subscriptions=store.subscriptions,
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+    )
+
+
+def _preview_manual_additions(store: ProxyStore, raw: str) -> dict[str, Any]:
+    lines = split_bulk_vless_lines(raw)
+    errors: list[str] = []
+    valid: list[StoredProxy] = []
+    seen_uris: set[str] = set()
+    existing_uris = {(p.uri or "").strip() for p in store.proxies if (p.uri or "").strip()}
+    draft_store = store
+
+    for idx, line in enumerate(lines, start=1):
+        log.debug("  строка %d: preview начало разбора (первые 72 символа): %r", idx, line[:72])
+        uri = line.strip()
+        if uri in seen_uris:
+            errors.append(f"Строка {idx}: дубль в текущем вводе — пропуск.")
+            continue
+        if uri in existing_uris:
+            errors.append(f"Строка {idx}: такой URI уже есть в списке — пропуск.")
+            continue
+        try:
+            scheme_of(uri)
+            base_name = suggest_proxy_name_from_uri(uri)
+            name = unique_proxy_name_from_store(draft_store, base_name)
+            build_proxy_dict_from_uri(uri, name)
+            item = StoredProxy(uri=uri, proxy_name=name, proxy_payload=None)
+            valid.append(item)
+            seen_uris.add(uri)
+            draft_store = _store_with_proxy(draft_store, item)
+        except ValueError as e:
+            errors.append(f"Строка {idx}: {e}")
+
+    return {
+        "raw": raw,
+        "lines_count": len(lines),
+        "valid": valid,
+        "errors": errors,
+        "draft_store": draft_store,
+    }
+
+
+def _manual_preview_message(preview: dict[str, Any]) -> tuple[str, str]:
+    valid_count = len(preview["valid"])
+    errors = preview["errors"]
+    if valid_count == 0:
+        msg = "Preview: не найдено ни одного валидного узла."
+        if errors:
+            msg += "\n" + "\n".join(errors[:25])
+            if len(errors) > 25:
+                msg += f"\n… ещё {len(errors) - 25} ошибок."
+        return msg, "error"
+    msg = f"Preview: готово к добавлению узлов: {valid_count}."
+    if errors:
+        msg += "\nПредупреждения:\n" + "\n".join(errors[:25])
+        if len(errors) > 25:
+            msg += f"\n… ещё {len(errors) - 25}."
+    return msg, "info"
+
+
+@router.post("/add/preview", response_class=HTMLResponse)
+async def htmx_add_preview(
+    request: Request,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+    link: str = Form(""),
+):
+    st = _store(settings)
+    store = st.load()
+    form = AddProxyForm.from_form(link)
+    preview = _preview_manual_additions(store, form.raw)
+    log.info("POST /htmx/add/preview: строк в поле=%d, valid=%d", preview["lines_count"], len(preview["valid"]))
+    if not preview["lines_count"]:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message=(
+                "Вставьте хотя бы одну строку с vless://, trojan://, hysteria2://, "
+                "hysteria:// или base64 blob со списком URI."
+            ),
+            message_kind="error",
+        )
+    msg, kind = _manual_preview_message(preview)
+    return _render_dashboard(
+        request,
+        settings,
+        store,
+        message=msg,
+        message_kind=kind,
+        manual_preview=preview,
+    )
+
+
+@router.post("/add/confirm", response_class=HTMLResponse)
 @router.post("/add", response_class=HTMLResponse)
 async def htmx_add(
     request: Request,
@@ -132,58 +240,22 @@ async def htmx_add(
     st = _store(settings)
     store = st.load()
     form = AddProxyForm.from_form(link)
-    lines = split_bulk_vless_lines(form.raw)
-    log.info("POST /htmx/add: строк в поле=%d", len(lines))
+    preview = _preview_manual_additions(store, form.raw)
+    added = len(preview["valid"])
+    errors = preview["errors"]
 
-    if not lines:
+    if added == 0:
+        msg, kind = _manual_preview_message(preview)
         return _render_dashboard(
             request,
             settings,
             store,
-            message=(
-                "Вставьте хотя бы одну строку с vless://, trojan://, "
-                "hysteria2:// или hysteria:// (можно несколько, по одной на строку)."
-            ),
-            message_kind="error",
+            message=msg,
+            message_kind=kind,
+            manual_preview=preview if preview["lines_count"] else None,
         )
 
-    errors: list[str] = []
-    added = 0
-    for idx, line in enumerate(lines, start=1):
-        log.debug("  строка %d: начало разбора (первые 72 символа): %r", idx, line[:72])
-        low = line.lower()
-        if not (
-            low.startswith("vless://")
-            or low.startswith("trojan://")
-            or low.startswith("hysteria2://")
-            or low.startswith("hysteria://")
-        ):
-            errors.append(f"Строка {idx}: неподдерживаемая схема URI — пропуск.")
-            continue
-        try:
-            base_name = suggest_proxy_name_from_uri(line)
-            name = unique_proxy_name_from_store(store, base_name)
-            build_proxy_dict_from_uri(line, name)
-            item = StoredProxy(uri=line, proxy_name=name, proxy_payload=None)
-            store = ProxyStore(
-                proxies=[*store.proxies, item],
-                subscriptions=store.subscriptions,
-                ui_auto_filter_enabled=store.ui_auto_filter_enabled,
-                ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
-                ui_auto_filter_source=store.ui_auto_filter_source,
-                ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
-            )
-            added += 1
-            log.info("  строка %d: добавлен узел «%s»", idx, name)
-        except ValueError as e:
-            errors.append(f"Строка {idx}: {e}")
-            log.warning("  строка %d: ошибка: %s", idx, e)
-
-    if added == 0:
-        msg = "Не добавлено ни одного узла.\n" + "\n".join(errors[:25])
-        if len(errors) > 25:
-            msg += f"\n… ещё {len(errors) - 25} ошибок."
-        return _render_dashboard(request, settings, store, message=msg, message_kind="error")
+    store = preview["draft_store"]
 
     st.save(store)
     log.info("Сохранён JSON, вызываю persist_and_reload (%d новых узлов)", added)
@@ -201,6 +273,120 @@ async def htmx_add(
         msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
         kind = "error"
     return _render_dashboard(request, settings, updated, message=msg, message_kind=kind)
+
+
+def _preview_subscription_links(store: ProxyStore, links: list[str]) -> dict[str, Any]:
+    errors: list[str] = []
+    valid: list[dict[str, str]] = []
+    seen_uris: set[str] = set()
+    existing_names = {p.proxy_name for p in store.proxies if p.source_type != "subscription"}
+
+    for idx, raw_uri in enumerate(links, start=1):
+        uri = (raw_uri or "").strip()
+        if not uri:
+            continue
+        if uri in seen_uris:
+            errors.append(f"Ссылка {idx}: дубль в подписке — пропуск.")
+            continue
+        try:
+            scheme_of(uri)
+            base_name = suggest_proxy_name_from_uri(uri)
+            name = unique_proxy_name(base_name, existing_names)
+            build_proxy_dict_from_uri(uri, name)
+            existing_names.add(name)
+            valid.append({"uri": uri, "proxy_name": name})
+            seen_uris.add(uri)
+        except ValueError as e:
+            errors.append(f"Ссылка {idx}: {e}")
+
+    return {
+        "links_count": len(links),
+        "valid": valid,
+        "errors": errors,
+    }
+
+
+def _subscription_preview_message(preview: dict[str, Any]) -> tuple[str, str]:
+    valid_count = len(preview["valid"])
+    errors = preview["errors"]
+    if valid_count == 0:
+        msg = "Preview подписки: валидных узлов не найдено."
+        if errors:
+            msg += "\n" + "\n".join(errors[:25])
+            if len(errors) > 25:
+                msg += f"\n… ещё {len(errors) - 25} ошибок."
+        return msg, "error"
+    msg = (
+        f"Preview подписки: ссылок получено {preview['links_count']}, "
+        f"к добавлению/обновлению валидных узлов {valid_count}."
+    )
+    if errors:
+        msg += "\nПредупреждения:\n" + "\n".join(errors[:25])
+        if len(errors) > 25:
+            msg += f"\n… ещё {len(errors) - 25}."
+    return msg, "info"
+
+
+async def _build_subscription_preview(
+    store: ProxyStore,
+    settings: SettingsDep,
+    form: AddSubscriptionForm,
+) -> dict[str, Any]:
+    snap = await fetch_subscription_snapshot(
+        form.url,
+        timeout_s=settings.subscriptions_fetch_timeout_sec,
+    )
+    preview = _preview_subscription_links(store, snap.links)
+    preview.update(
+        {
+            "url": form.url,
+            "name": form.name,
+            "subscription_url": snap.subscription_url or form.url,
+            "user": snap.user,
+        }
+    )
+    return preview
+
+
+@router.post("/subscription/preview", response_class=HTMLResponse)
+async def htmx_subscription_preview(
+    request: Request,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+    url: str = Form(""),
+    name: str = Form(""),
+):
+    st = _store(settings)
+    store = st.load()
+    form = AddSubscriptionForm.from_form(url=url, name=name)
+    if not form.url:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message="Укажите URL подписки.",
+            message_kind="error",
+        )
+    try:
+        preview = await _build_subscription_preview(store, settings, form)
+    except SubscriptionFetchError as e:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message=f"Preview подписки не выполнен: {e}",
+            message_kind="error",
+            subscription_preview={"url": form.url, "name": form.name, "valid": [], "errors": [str(e)], "links_count": 0},
+        )
+    msg, kind = _subscription_preview_message(preview)
+    return _render_dashboard(
+        request,
+        settings,
+        store,
+        message=msg,
+        message_kind=kind,
+        subscription_preview=preview,
+    )
 
 
 @router.post("/subscription/add", response_class=HTMLResponse)
@@ -223,36 +409,82 @@ async def htmx_subscription_add(
             message_kind="error",
         )
 
-    existed = next((s for s in store.subscriptions if s.url == form.url), None)
+    try:
+        preview = await _build_subscription_preview(store, settings, form)
+    except SubscriptionFetchError as e:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message=f"Подписка не добавлена: {e}",
+            message_kind="error",
+            subscription_preview={"url": form.url, "name": form.name, "valid": [], "errors": [str(e)], "links_count": 0},
+        )
+
+    if not preview["valid"]:
+        msg, kind = _subscription_preview_message(preview)
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message=msg,
+            message_kind=kind,
+            subscription_preview=preview,
+        )
+
+    effective_url = preview["subscription_url"]
+    existed = next((s for s in store.subscriptions if s.url in {form.url, effective_url}), None)
+    now = datetime.now(timezone.utc).isoformat()
     if existed:
+        updated_sub = existed.model_copy(deep=True)
         if form.name:
-            existed.name = form.name
-        store = ProxyStore(
-            proxies=store.proxies,
-            subscriptions=store.subscriptions,
-            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
-            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
-            ui_auto_filter_source=store.ui_auto_filter_source,
-            ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
-        )
+            updated_sub.name = form.name
+        updated_sub.url = effective_url
+        updated_sub.links = [v["uri"] for v in preview["valid"]]
+        updated_sub.user = preview.get("user")
+        updated_sub.last_error = None
+        updated_sub.last_refresh_at = now
+        subscriptions = [updated_sub if s.id == existed.id else s for s in store.subscriptions]
     else:
-        store = ProxyStore(
-            proxies=store.proxies,
-            subscriptions=[
-                *store.subscriptions,
-                StoredSubscription(url=form.url, name=form.name),
-            ],
-            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
-            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
-            ui_auto_filter_source=store.ui_auto_filter_source,
-            ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
-        )
-    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
+        subscriptions = [
+            *store.subscriptions,
+            StoredSubscription(
+                url=effective_url,
+                name=form.name,
+                links=[v["uri"] for v in preview["valid"]],
+                user=preview.get("user"),
+                last_refresh_at=now,
+                last_error=None,
+            ),
+        ]
+    store = ProxyStore(
+        proxies=store.proxies,
+        subscriptions=subscriptions,
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+    )
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=False)
     st.save(updated)
-    msg = "Подписка добавлена и обновлена." if not existed else "Подписка уже была в списке, данные обновлены."
+    msg = (
+        "Подписка добавлена из preview."
+        if not existed
+        else "Подписка уже была в списке, данные обновлены из preview."
+    )
+    if preview["errors"]:
+        msg += "\nПредупреждения:\n" + "\n".join(preview["errors"][:25])
+        if len(preview["errors"]) > 25:
+            msg += f"\n… ещё {len(preview['errors']) - 25}."
     if err:
         msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
-    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+    return _render_dashboard(
+        request,
+        settings,
+        updated,
+        message=msg,
+        message_kind="error" if err else "info",
+    )
 
 
 @router.post("/subscription/{subscription_id}/refresh", response_class=HTMLResponse)
