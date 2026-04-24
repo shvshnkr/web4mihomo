@@ -97,7 +97,12 @@ def hydrate_store_from_provider_yaml(store: ProxyStore, settings: Settings) -> P
     if not imported:
         return store
     log.info("hydrate: импортировано %d узл(ов) из %s в пустой JSON", len(imported), path)
-    return ProxyStore(proxies=imported, subscriptions=store.subscriptions)
+    return ProxyStore(
+        proxies=imported,
+        subscriptions=store.subscriptions,
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+    )
 
 
 def build_proxy_dicts(store: ProxyStore) -> list[dict[str, Any]]:
@@ -202,7 +207,12 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
         generated.extend(built)
         if parse_warn and not sub.last_error:
             sub.last_error = parse_warn
-    out = ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+    out = ProxyStore(
+        proxies=[*manual, *generated],
+        subscriptions=updated_subs,
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+    )
     _dbg(
         "H3",
         "app/sync_service.py:materialize_subscription_proxies",
@@ -283,7 +293,12 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
                 auto_excluded.discard(uri)
         sub.auto_excluded_uris = sorted(auto_excluded)
 
-    result = ProxyStore(proxies=store.proxies, subscriptions=updated_subs)
+    result = ProxyStore(
+        proxies=store.proxies,
+        subscriptions=updated_subs,
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+    )
     _dbg(
         "H9",
         "app/sync_service.py:apply_auto_filter_policy",

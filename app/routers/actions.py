@@ -121,7 +121,12 @@ async def htmx_add(
             name = unique_proxy_name_from_store(store, base_name)
             build_proxy_dict_from_uri(line, name)
             item = StoredProxy(uri=line, proxy_name=name, proxy_payload=None)
-            store = ProxyStore(proxies=[*store.proxies, item])
+            store = ProxyStore(
+                proxies=[*store.proxies, item],
+                subscriptions=store.subscriptions,
+                ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+                ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            )
             added += 1
             log.info("  строка %d: добавлен узел «%s»", idx, name)
         except ValueError as e:
@@ -176,7 +181,12 @@ async def htmx_subscription_add(
     if existed:
         if form.name:
             existed.name = form.name
-        store = ProxyStore(proxies=store.proxies, subscriptions=store.subscriptions)
+        store = ProxyStore(
+            proxies=store.proxies,
+            subscriptions=store.subscriptions,
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        )
     else:
         store = ProxyStore(
             proxies=store.proxies,
@@ -184,6 +194,8 @@ async def htmx_subscription_add(
                 *store.subscriptions,
                 StoredSubscription(url=form.url, name=form.name),
             ],
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         )
     updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
     st.save(updated)
@@ -248,6 +260,8 @@ async def htmx_subscription_delete(
     store = ProxyStore(
         proxies=[p for p in store.proxies if p.subscription_id != subscription_id],
         subscriptions=[s for s in store.subscriptions if s.id != subscription_id],
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
     )
     if len(store.subscriptions) == before:
         return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
@@ -361,6 +375,17 @@ async def htmx_auto_filter_config(
     max_delay = max(100, min(120000, int(max_delay_ms or 1500)))
     store.ui_auto_filter_enabled = is_enabled
     store.ui_auto_filter_max_delay_ms = max_delay
+    _dbg(
+        "H11",
+        "app/routers/actions.py:htmx_auto_filter_config",
+        "auto_filter_config_saved",
+        {
+            "enabled": is_enabled,
+            "max_delay_ms": max_delay,
+            "store_value_enabled": store.ui_auto_filter_enabled,
+            "store_value_max_delay_ms": store.ui_auto_filter_max_delay_ms,
+        },
+    )
     if not is_enabled:
         for s in store.subscriptions:
             s.auto_excluded_uris = []
@@ -385,6 +410,8 @@ async def htmx_delete(
     store = ProxyStore(
         proxies=[p for p in store.proxies if p.id != proxy_id],
         subscriptions=store.subscriptions,
+        ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
     )
     st.save(store)
     updated, err = await persist_and_reload(settings, store)

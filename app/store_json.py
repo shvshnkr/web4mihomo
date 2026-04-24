@@ -84,7 +84,12 @@ class StoreJson:
     def upsert(self, store: ProxyStore, item: StoredProxy) -> ProxyStore:
         items = [p for p in store.proxies if p.id != item.id]
         items.append(item)
-        store = ProxyStore(proxies=items)
+        store = ProxyStore(
+            proxies=items,
+            subscriptions=store.subscriptions,
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        )
         self.save(store)
         return store
 
@@ -92,6 +97,8 @@ class StoreJson:
         store = ProxyStore(
             proxies=[p for p in store.proxies if p.id != proxy_id],
             subscriptions=store.subscriptions,
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         )
         self.save(store)
         return store
@@ -100,6 +107,8 @@ class StoreJson:
         store = ProxyStore(
             proxies=[p for p in store.proxies if p.subscription_id != subscription_id],
             subscriptions=store.subscriptions,
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         )
         self.save(store)
         return store
@@ -113,7 +122,12 @@ class StoreJson:
     def upsert_subscription(self, store: ProxyStore, item: StoredSubscription) -> ProxyStore:
         subs = [s for s in store.subscriptions if s.id != item.id]
         subs.append(item)
-        store = ProxyStore(proxies=store.proxies, subscriptions=subs)
+        store = ProxyStore(
+            proxies=store.proxies,
+            subscriptions=subs,
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        )
         self.save(store)
         return store
 
@@ -121,6 +135,8 @@ class StoreJson:
         store = ProxyStore(
             proxies=[p for p in store.proxies if p.subscription_id != subscription_id],
             subscriptions=[s for s in store.subscriptions if s.id != subscription_id],
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         )
         self.save(store)
         return store
