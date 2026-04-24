@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -34,6 +36,24 @@ class MihomoClient:
             headers=self._headers(),
             timeout=self._timeout,
         )
+
+    def _dbg(self, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+        # region agent log
+        try:
+            payload = {
+                "sessionId": "41d724",
+                "runId": "pre-fix-delay",
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+            with open("debug-41d724.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        # endregion
 
     async def provider_update(self, provider_name: str) -> None:
         from urllib.parse import quote
@@ -72,14 +92,41 @@ class MihomoClient:
         if expected and expected.strip():
             params["expected"] = expected.strip()
 
-        async with self._client() as c:
-            r = await c.get(f"/proxies/{enc}/delay", params=params)
+        self._dbg(
+            "H1",
+            "app/mihomo_client.py:proxy_delay_ms",
+            "delay_request_start",
+            {"proxy_name": proxy_name, "timeout_ms": timeout_ms, "has_expected": bool(expected)},
+        )
+        try:
+            async with self._client() as c:
+                r = await c.get(f"/proxies/{enc}/delay", params=params)
+        except Exception as e:
+            self._dbg(
+                "H1",
+                "app/mihomo_client.py:proxy_delay_ms",
+                "delay_request_exception",
+                {"proxy_name": proxy_name, "exc_type": type(e).__name__, "exc": str(e)},
+            )
+            raise
         if r.status_code == 200:
             data = r.json()
             delay = int(data.get("delay", 0))
             if delay <= 0:
                 raise MihomoAPIError("delay test returned non-positive delay")
+            self._dbg(
+                "H2",
+                "app/mihomo_client.py:proxy_delay_ms",
+                "delay_status_200",
+                {"proxy_name": proxy_name, "delay": delay},
+            )
             return delay
+        self._dbg(
+            "H2",
+            "app/mihomo_client.py:proxy_delay_ms",
+            "delay_non_200",
+            {"proxy_name": proxy_name, "status_code": r.status_code},
+        )
         body = r.text
         try:
             data = r.json()

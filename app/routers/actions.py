@@ -1,7 +1,9 @@
 """HTMX partial routes (mutations and delay tests)."""
 
 import asyncio
+import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -27,6 +29,25 @@ router = APIRouter(prefix="/htmx", tags=["htmx"])
 
 def _store(settings: SettingsDep) -> StoreJson:
     return StoreJson(settings.json_store_path)
+
+
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "41d724",
+            "runId": "pre-fix-delay",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        with open("debug-41d724.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 def _norm_uri(uri: str) -> str:
@@ -377,6 +398,12 @@ async def htmx_delay_one(
         )
     log.info("POST /htmx/delay/%s имя=%r", proxy_id, item.proxy_name)
     client = MihomoClient(settings)
+    _dbg(
+        "H3",
+        "app/routers/actions.py:htmx_delay_one",
+        "delay_one_start",
+        {"proxy_id": proxy_id, "proxy_name": item.proxy_name},
+    )
     try:
         ms = await client.proxy_delay_ms(
             item.proxy_name,
@@ -394,6 +421,12 @@ async def htmx_delay_one(
             message_kind="info",
         )
     except MihomoAPIError as e:
+        _dbg(
+            "H3",
+            "app/routers/actions.py:htmx_delay_one",
+            "delay_one_mihomo_error",
+            {"proxy_id": proxy_id, "error": str(e)},
+        )
         _patch_delay_ms(store, proxy_id, None)
         st.save(store)
         return _render_dashboard(
@@ -403,6 +436,14 @@ async def htmx_delay_one(
             message=f"Delay test: {e}",
             message_kind="error",
         )
+    except Exception as e:
+        _dbg(
+            "H3",
+            "app/routers/actions.py:htmx_delay_one",
+            "delay_one_unhandled_exception",
+            {"proxy_id": proxy_id, "exc_type": type(e).__name__, "exc": str(e)},
+        )
+        raise
 
 
 def _patch_delay_ms(store: ProxyStore, proxy_id: str, ms: int | None) -> None:
@@ -431,6 +472,12 @@ async def htmx_test_all(
 
     client = MihomoClient(settings)
     sem = asyncio.Semaphore(settings.test_all_concurrency)
+    _dbg(
+        "H4",
+        "app/routers/actions.py:htmx_test_all",
+        "test_all_start",
+        {"proxies_count": len(store.proxies), "concurrency": settings.test_all_concurrency},
+    )
 
     async def one(p: StoredProxy) -> None:
         async with sem:
@@ -445,6 +492,14 @@ async def htmx_test_all(
                 p.last_sync_error = None
             except MihomoAPIError:
                 p.last_delay_ms = None
+            except Exception as e:
+                _dbg(
+                    "H4",
+                    "app/routers/actions.py:htmx_test_all",
+                    "test_all_unhandled_exception",
+                    {"proxy_name": p.proxy_name, "exc_type": type(e).__name__, "exc": str(e)},
+                )
+                raise
 
     await asyncio.gather(*(one(p) for p in store.proxies))
     st.save(store)
