@@ -15,7 +15,12 @@ from app.mihomo_client import MihomoAPIError, MihomoClient
 from app.models import AddProxyForm, AddSubscriptionForm, ProxyStore, StoredProxy, StoredSubscription
 from app.uri_to_proxy import build_proxy_dict_from_uri, suggest_proxy_name_from_uri
 from app.store_json import StoreJson
-from app.sync_service import apply_auto_filter_policy, persist_and_reload, unique_proxy_name_from_store
+from app.sync_service import (
+    apply_auto_filter_policy,
+    materialize_subscription_proxies,
+    persist_and_reload,
+    unique_proxy_name_from_store,
+)
 from app.vless_bulk import split_bulk_vless_lines
 
 log = logging.getLogger("web4mihomo.actions")
@@ -570,11 +575,43 @@ async def htmx_test_all(
         if effective_settings.auto_filter_enabled
         else effective_settings.delay_test_url
     )
+    store_for_test = store
+    if effective_settings.auto_filter_enabled:
+        full_store = materialize_subscription_proxies(store, apply_excludes=False)
+        existing_sub_uris = {
+            (p.subscription_id, (p.uri or "").strip())
+            for p in store.proxies
+            if p.source_type == "subscription" and p.subscription_id and (p.uri or "").strip()
+        }
+        recheck = [
+            p.model_copy(deep=True)
+            for p in full_store.proxies
+            if p.source_type == "subscription"
+            and p.subscription_id
+            and (p.uri or "").strip()
+            and (p.subscription_id, (p.uri or "").strip()) not in existing_sub_uris
+        ]
+        store_for_test = ProxyStore(
+            proxies=[*store.proxies, *recheck],
+            subscriptions=[s.model_copy(deep=True) for s in store.subscriptions],
+            ui_auto_filter_enabled=store.ui_auto_filter_enabled,
+            ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        )
+        _dbg(
+            "H12",
+            "app/routers/actions.py:htmx_test_all",
+            "test_all_recheck_scope",
+            {
+                "base_proxies": len(store.proxies),
+                "recheck_added": len(recheck),
+                "total_tested": len(store_for_test.proxies),
+            },
+        )
     _dbg(
         "H4",
         "app/routers/actions.py:htmx_test_all",
         "test_all_start",
-        {"proxies_count": len(store.proxies), "concurrency": settings.test_all_concurrency},
+        {"proxies_count": len(store_for_test.proxies), "concurrency": settings.test_all_concurrency},
     )
 
     async def one(p: StoredProxy) -> None:
@@ -601,31 +638,31 @@ async def htmx_test_all(
                 p.last_delay_ms = None
                 p.last_delay_error = f"Delay error: {type(e).__name__}"
 
-    await asyncio.gather(*(one(p) for p in store.proxies))
+    await asyncio.gather(*(one(p) for p in store_for_test.proxies))
     _dbg(
         "H6",
         "app/routers/actions.py:htmx_test_all",
         "test_all_after_gather",
         {
-            "with_delay": sum(1 for p in store.proxies if p.last_delay_ms is not None),
-            "with_error": sum(1 for p in store.proxies if p.last_delay_error),
-            "total": len(store.proxies),
+            "with_delay": sum(1 for p in store_for_test.proxies if p.last_delay_ms is not None),
+            "with_error": sum(1 for p in store_for_test.proxies if p.last_delay_error),
+            "total": len(store_for_test.proxies),
         },
     )
-    store = apply_auto_filter_policy(store, effective_settings)
+    store_for_test = apply_auto_filter_policy(store_for_test, effective_settings)
     _dbg(
         "H10",
         "app/routers/actions.py:htmx_test_all",
         "test_all_after_auto_filter",
         {
-            "auto_excluded_total": sum(len(s.auto_excluded_uris) for s in store.subscriptions),
-            "manual_excluded_total": sum(len(s.excluded_uris) for s in store.subscriptions),
-            "proxies_total": len(store.proxies),
+            "auto_excluded_total": sum(len(s.auto_excluded_uris) for s in store_for_test.subscriptions),
+            "manual_excluded_total": sum(len(s.excluded_uris) for s in store_for_test.subscriptions),
+            "proxies_total": len(store_for_test.proxies),
         },
     )
-    updated, err = await persist_and_reload(effective_settings, store)
+    updated, err = await persist_and_reload(effective_settings, store_for_test)
     st.save(updated)
-    log.info("POST /htmx/test-all: завершено для %d узлов", len(store.proxies))
+    log.info("POST /htmx/test-all: завершено для %d узлов", len(store_for_test.proxies))
     auto_excluded = sum(len(s.auto_excluded_uris) for s in updated.subscriptions)
     msg = "Проверка задержек завершена."
     if effective_settings.auto_filter_enabled:

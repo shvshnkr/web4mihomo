@@ -38,6 +38,19 @@ pip install -r requirements.txt
 
 Быстрый скрипт: `bash scripts/setup-venv.sh`
 
+Установка systemd unit:
+
+```bash
+sudo bash scripts/install-systemd-unit.sh
+```
+
+При необходимости можно переопределить параметры:
+
+```bash
+sudo UNIT_NAME=web4mihomo APP_DIR=/etc/mihomo/web4mihomo APP_USER=root APP_GROUP=root PORT=8800 \
+  bash scripts/install-systemd-unit.sh
+```
+
 ## Настройка
 
 Переменные окружения или файл **`.env`** в корне проекта (см. [`app/settings.py`](app/settings.py)):
@@ -128,7 +141,7 @@ proxy-groups:
 - Запускать `Delay: все` по рабочему probe URL (`http://cp.cloudflare.com/generate_204`).
 - Узлы подписок с `503/504/timeout` или `delay > AUTO_FILTER_MAX_DELAY_MS` автоматически попадают в `auto_excluded_uris`.
 - При следующем sync такие узлы не попадают в **LB provider**, и группа `WEB4_LB` работает по очищенному набору.
-- После успешной проверки узлы возвращаются автоматически (или вручную через `Restore all auto-excluded`).
+- `Delay: все` выполняет recheck для уже auto-excluded subscription-узлов, чтобы они могли автоматически вернуться в LB после стабилизации.
 
 Рекомендованные стартовые значения:
 
