@@ -68,8 +68,37 @@ def _effective_settings(settings: SettingsDep, store: ProxyStore) -> SettingsDep
     if store.ui_auto_filter_source is not None:
         updates["auto_filter_source"] = store.ui_auto_filter_source
     if not updates:
+        # region agent log
+        _dbg(
+            "H21",
+            "app/routers/actions.py:_effective_settings",
+            "effective_settings_no_override",
+            {
+                "env_enabled": settings.auto_filter_enabled,
+                "env_max_delay": settings.auto_filter_max_delay_ms,
+                "env_source": settings.auto_filter_source,
+                "store_enabled": store.ui_auto_filter_enabled,
+                "store_max_delay": store.ui_auto_filter_max_delay_ms,
+                "store_source": store.ui_auto_filter_source,
+            },
+        )
+        # endregion
         return settings
-    return settings.model_copy(update=updates)
+    effective = settings.model_copy(update=updates)
+    # region agent log
+    _dbg(
+        "H21",
+        "app/routers/actions.py:_effective_settings",
+        "effective_settings_with_override",
+        {
+            "updates": updates,
+            "effective_enabled": effective.auto_filter_enabled,
+            "effective_max_delay": effective.auto_filter_max_delay_ms,
+            "effective_source": effective.auto_filter_source,
+        },
+    )
+    # endregion
+    return effective
 
 
 def _extract_mihomo_delay_map(payload: dict[str, Any]) -> dict[str, int | None]:

@@ -1,5 +1,8 @@
 """Full-page routes (Jinja2)."""
 
+import json
+from datetime import datetime, timezone
+
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request, status
@@ -27,6 +30,25 @@ def _store(settings: SettingsDep) -> StoreJson:
     return StoreJson(settings.json_store_path)
 
 
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "41d724",
+            "runId": "ui-f5-forgets",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        with open("debug-41d724.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, settings: SettingsDep):
     if settings.ui_password and not request.session.get("web4_auth"):
@@ -35,6 +57,21 @@ async def index(request: Request, settings: SettingsDep):
             status_code=status.HTTP_303_SEE_OTHER,
         )
     store = _store(settings).load()
+    # region agent log
+    _dbg(
+        "H20",
+        "app/routers/pages.py:index",
+        "index_render_values",
+        {
+            "env_enabled": settings.auto_filter_enabled,
+            "env_max_delay": settings.auto_filter_max_delay_ms,
+            "env_source": settings.auto_filter_source,
+            "store_enabled": store.ui_auto_filter_enabled,
+            "store_max_delay": store.ui_auto_filter_max_delay_ms,
+            "store_source": store.ui_auto_filter_source,
+        },
+    )
+    # endregion
     return templates.TemplateResponse(
         request,
         "index.html",

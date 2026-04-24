@@ -49,7 +49,14 @@ class StoreJson:
             "H1",
             "app/store_json.py:load",
             "store_loaded",
-            {"path": str(self.path), "proxies": len(store.proxies), "subscriptions": len(store.subscriptions)},
+            {
+                "path": str(self.path),
+                "proxies": len(store.proxies),
+                "subscriptions": len(store.subscriptions),
+                "ui_auto_filter_enabled": store.ui_auto_filter_enabled,
+                "ui_auto_filter_max_delay_ms": store.ui_auto_filter_max_delay_ms,
+                "ui_auto_filter_source": store.ui_auto_filter_source,
+            },
         )
         return store
 
