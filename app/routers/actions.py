@@ -499,7 +499,8 @@ async def htmx_test_all(
                     "test_all_unhandled_exception",
                     {"proxy_name": p.proxy_name, "exc_type": type(e).__name__, "exc": str(e)},
                 )
-                raise
+                p.last_delay_ms = None
+                p.last_sync_error = f"Delay error: {type(e).__name__}"
 
     await asyncio.gather(*(one(p) for p in store.proxies))
     st.save(store)

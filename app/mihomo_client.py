@@ -101,14 +101,17 @@ class MihomoClient:
         try:
             async with self._client() as c:
                 r = await c.get(f"/proxies/{enc}/delay", params=params)
-        except Exception as e:
+        except httpx.HTTPError as e:
             self._dbg(
                 "H1",
                 "app/mihomo_client.py:proxy_delay_ms",
                 "delay_request_exception",
                 {"proxy_name": proxy_name, "exc_type": type(e).__name__, "exc": str(e)},
             )
-            raise
+            raise MihomoAPIError(
+                f"delay request failed: {type(e).__name__}",
+                status_code=None,
+            ) from e
         if r.status_code == 200:
             data = r.json()
             delay = int(data.get("delay", 0))
