@@ -35,7 +35,7 @@ def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
     try:
         payload = {
             "sessionId": "41d724",
-            "runId": "pre-fix-delay",
+            "runId": "pre-fix-root-cause",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -525,6 +525,16 @@ async def htmx_test_all(
                 p.last_sync_error = f"Delay error: {type(e).__name__}"
 
     await asyncio.gather(*(one(p) for p in store.proxies))
+    _dbg(
+        "H6",
+        "app/routers/actions.py:htmx_test_all",
+        "test_all_after_gather",
+        {
+            "with_delay": sum(1 for p in store.proxies if p.last_delay_ms is not None),
+            "with_error": sum(1 for p in store.proxies if p.last_sync_error),
+            "total": len(store.proxies),
+        },
+    )
     store = apply_auto_filter_policy(store, settings)
     updated, err = await persist_and_reload(settings, store)
     st.save(updated)

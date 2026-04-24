@@ -27,7 +27,7 @@ def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
     try:
         payload = {
             "sessionId": "41d724",
-            "runId": "dual-provider-state",
+            "runId": "pre-fix-root-cause",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -302,9 +302,45 @@ async def persist_and_reload(
             "provider_lb_name": settings.provider_lb_name,
         },
     )
+    _dbg(
+        "H6",
+        "app/sync_service.py:persist_and_reload",
+        "input_delay_state",
+        {
+            "proxies_with_delay": sum(1 for p in store.proxies if p.last_delay_ms is not None),
+            "proxies_with_error": sum(1 for p in store.proxies if p.last_sync_error),
+            "total_proxies": len(store.proxies),
+        },
+    )
     store = hydrate_store_from_provider_yaml(store, settings)
     store_full = materialize_subscription_proxies(store, apply_excludes=False)
     store_lb = materialize_subscription_proxies(store, apply_excludes=True)
+    manual_excluded = {
+        u.strip()
+        for s in store.subscriptions
+        for u in s.excluded_uris
+        if u and u.strip()
+    }
+    full_excluded_present = sum(
+        1
+        for p in store_full.proxies
+        if p.source_type == "subscription" and p.uri and p.uri.strip() in manual_excluded
+    )
+    lb_excluded_present = sum(
+        1
+        for p in store_lb.proxies
+        if p.source_type == "subscription" and p.uri and p.uri.strip() in manual_excluded
+    )
+    _dbg(
+        "H8",
+        "app/sync_service.py:persist_and_reload",
+        "manual_excluded_presence",
+        {
+            "manual_excluded_total": len(manual_excluded),
+            "full_excluded_present": full_excluded_present,
+            "lb_excluded_present": lb_excluded_present,
+        },
+    )
 
     proxies_full = build_proxy_dicts(store_full)
     proxies_lb = build_proxy_dicts(store_lb)
@@ -359,6 +395,17 @@ async def persist_and_reload(
     else:
         for p in updated.proxies:
             p.last_sync_error = None
+    _dbg(
+        "H7",
+        "app/sync_service.py:persist_and_reload",
+        "output_delay_state",
+        {
+            "updated_proxies_with_delay": sum(1 for p in updated.proxies if p.last_delay_ms is not None),
+            "updated_proxies_with_error": sum(1 for p in updated.proxies if p.last_sync_error),
+            "updated_total_proxies": len(updated.proxies),
+            "sync_error": sync_error,
+        },
+    )
     _dbg(
         "H5",
         "app/sync_service.py:persist_and_reload",
