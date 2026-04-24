@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,25 @@ from app.subscription_client import SubscriptionFetchError, fetch_subscription_s
 from app.uri_to_proxy import build_proxy_dict_from_uri, suggest_proxy_name_from_uri
 
 log = logging.getLogger("web4mihomo.sync")
+
+
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "41d724",
+            "runId": "dual-provider-state",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        with open("debug-41d724.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 def unique_proxy_name_from_store(store: ProxyStore, base: str) -> str:
@@ -181,7 +201,20 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
         generated.extend(built)
         if parse_warn and not sub.last_error:
             sub.last_error = parse_warn
-    return ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+    out = ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+    _dbg(
+        "H3",
+        "app/sync_service.py:materialize_subscription_proxies",
+        "materialized",
+        {
+            "apply_excludes": apply_excludes,
+            "manual_count": len(manual),
+            "generated_count": len(generated),
+            "subscriptions": len(updated_subs),
+            "result_count": len(out.proxies),
+        },
+    )
+    return out
 
 
 def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStore:
@@ -257,6 +290,18 @@ async def persist_and_reload(
     if refresh_subscriptions:
         store = await refresh_enabled_subscriptions(store, settings)
 
+    _dbg(
+        "H4",
+        "app/sync_service.py:persist_and_reload",
+        "persist_start",
+        {
+            "refresh_subscriptions": refresh_subscriptions,
+            "store_proxies_in": len(store.proxies),
+            "store_subscriptions_in": len(store.subscriptions),
+            "provider_name": settings.provider_name,
+            "provider_lb_name": settings.provider_lb_name,
+        },
+    )
     store = hydrate_store_from_provider_yaml(store, settings)
     store_full = materialize_subscription_proxies(store, apply_excludes=False)
     store_lb = materialize_subscription_proxies(store, apply_excludes=True)
@@ -272,6 +317,17 @@ async def persist_and_reload(
     )
     write_provider_file(settings.provider_yaml_path, proxies_full)
     write_provider_file(settings.provider_lb_yaml_path, proxies_lb)
+    _dbg(
+        "H5",
+        "app/sync_service.py:persist_and_reload",
+        "providers_written",
+        {
+            "full_count": len(proxies_full),
+            "lb_count": len(proxies_lb),
+            "full_path": str(settings.provider_yaml_path),
+            "lb_path": str(settings.provider_lb_yaml_path),
+        },
+    )
 
     sync_error: str | None = None
     updated = store_lb.model_copy(deep=True)
@@ -303,5 +359,15 @@ async def persist_and_reload(
     else:
         for p in updated.proxies:
             p.last_sync_error = None
+    _dbg(
+        "H5",
+        "app/sync_service.py:persist_and_reload",
+        "persist_done",
+        {
+            "updated_proxies": len(updated.proxies),
+            "updated_subscriptions": len(updated.subscriptions),
+            "sync_error": sync_error,
+        },
+    )
 
     return updated, sync_error
