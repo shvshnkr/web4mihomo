@@ -37,6 +37,8 @@ def _effective_settings(settings: SettingsDep, store) -> SettingsDep:
         updates["auto_filter_source"] = store.ui_auto_filter_source
     if getattr(store, "ui_auto_filter_recheck_interval_sec", None) is not None:
         updates["auto_filter_recheck_interval_sec"] = store.ui_auto_filter_recheck_interval_sec
+    if getattr(store, "ui_auto_filter_recover_streak", None) is not None:
+        updates["auto_filter_recover_streak"] = store.ui_auto_filter_recover_streak
     if not updates:
         return settings
     return settings.model_copy(update=updates)

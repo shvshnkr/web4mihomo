@@ -158,6 +158,12 @@ class Settings(BaseSettings):
         le=20,
         description="Consecutive failures required for auto-exclude.",
     )
+    auto_filter_recover_streak: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description="Consecutive healthy checks required to restore from auto-exclude.",
+    )
     auto_filter_recheck_interval_sec: int = Field(
         default=300,
         ge=30,

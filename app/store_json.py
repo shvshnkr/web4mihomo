@@ -91,6 +91,7 @@ class StoreJson:
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
             ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+            ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
         )
         self.save(store)
         return store
@@ -103,6 +104,7 @@ class StoreJson:
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
             ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+            ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
         )
         self.save(store)
         return store
@@ -115,6 +117,7 @@ class StoreJson:
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
             ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+            ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
         )
         self.save(store)
         return store
@@ -135,6 +138,7 @@ class StoreJson:
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
             ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+            ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
         )
         self.save(store)
         return store
@@ -147,6 +151,7 @@ class StoreJson:
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
             ui_auto_filter_source=store.ui_auto_filter_source,
             ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+            ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
         )
         self.save(store)
         return store

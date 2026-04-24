@@ -35,6 +35,8 @@ async def _auto_refresh_loop(settings: Settings) -> None:
             updates["auto_filter_source"] = store.ui_auto_filter_source
         if store.ui_auto_filter_recheck_interval_sec is not None:
             updates["auto_filter_recheck_interval_sec"] = store.ui_auto_filter_recheck_interval_sec
+        if store.ui_auto_filter_recover_streak is not None:
+            updates["auto_filter_recover_streak"] = store.ui_auto_filter_recover_streak
         if not updates:
             return base
         return base.model_copy(update=updates)

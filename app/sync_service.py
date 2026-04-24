@@ -105,6 +105,7 @@ def hydrate_store_from_provider_yaml(store: ProxyStore, settings: Settings) -> P
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
         ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+        ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
     )
 
 
@@ -222,6 +223,7 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
         ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+        ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
     )
     _dbg(
         "H3",
@@ -297,6 +299,7 @@ def apply_auto_filter_policy(
             "source": settings.auto_filter_source,
             "max_delay_ms": settings.auto_filter_max_delay_ms,
             "fail_streak_threshold": settings.auto_filter_fail_streak,
+            "recover_streak_threshold": settings.auto_filter_recover_streak,
             "proxies_total": len(store.proxies),
             "subscriptions_total": len(store.subscriptions),
         },
@@ -348,7 +351,7 @@ def apply_auto_filter_policy(
 
         sub.node_stats[uri] = stat
 
-    recovery_streak_threshold = 2
+    recovery_streak_threshold = settings.auto_filter_recover_streak
     for sub in updated_subs:
         manual_excluded = {u.strip() for u in sub.excluded_uris if u and u.strip()}
         auto_excluded = {u.strip() for u in sub.auto_excluded_uris if u and u.strip()}
@@ -369,6 +372,7 @@ def apply_auto_filter_policy(
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,
         ui_auto_filter_recheck_interval_sec=store.ui_auto_filter_recheck_interval_sec,
+        ui_auto_filter_recover_streak=store.ui_auto_filter_recover_streak,
     )
     _dbg(
         "H9",

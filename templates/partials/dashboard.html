@@ -45,7 +45,8 @@
             <div class="mt-1 text-xs text-slate-400">
               Строк после нормализации: {{ manual_preview.lines_count }},
               валидных: {{ manual_preview.valid|length }},
-              предупреждений: {{ manual_preview.errors|length }}.
+              предупреждений: {{ manual_preview.errors|length }},
+              ping alive: {{ manual_preview.alive_total or 0 }}/{{ manual_preview.checked_total or 0 }}.
             </div>
           </div>
           {% if manual_preview.valid %}
@@ -67,6 +68,7 @@
                 <tr>
                   <th class="px-2 py-1">Имя</th>
                   <th class="px-2 py-1">URI</th>
+                  <th class="px-2 py-1">Ping</th>
                 </tr>
               </thead>
               <tbody>
@@ -75,6 +77,16 @@
                     <tr class="border-t border-slate-800">
                       <td class="px-2 py-1 text-slate-200">{{ p.proxy_name }}</td>
                       <td class="px-2 py-1"><code class="block max-w-xl truncate text-slate-400" title="{{ p.uri }}">{{ p.uri }}</code></td>
+                      <td class="px-2 py-1 text-[11px]">
+                        {% set s = manual_preview.ping_stats.get(p.proxy_name) if manual_preview.ping_stats else None %}
+                        {% if s and s.alive > 0 %}
+                          <span class="text-emerald-300">{{ s.alive }}/{{ s.total }} alive{% if s.best_ms is not none %}, best {{ s.best_ms }}ms{% endif %}</span>
+                        {% elif s and s.error %}
+                          <span class="text-red-300" title="{{ s.error }}">fail</span>
+                        {% else %}
+                          <span class="text-slate-500">n/a</span>
+                        {% endif %}
+                      </td>
                     </tr>
                   {% endif %}
                 {% endfor %}
@@ -142,7 +154,8 @@
             <div class="mt-1 text-xs text-slate-400">
               Ссылок получено: {{ subscription_preview.links_count }},
               валидных: {{ subscription_preview.valid|length }},
-              предупреждений: {{ subscription_preview.errors|length }}.
+              предупреждений: {{ subscription_preview.errors|length }},
+              ping alive: {{ subscription_preview.alive_total or 0 }}/{{ subscription_preview.checked_total or 0 }}.
             </div>
           </div>
           {% if subscription_preview.valid %}
@@ -165,6 +178,7 @@
                 <tr>
                   <th class="px-2 py-1">Имя</th>
                   <th class="px-2 py-1">URI</th>
+                  <th class="px-2 py-1">Ping</th>
                 </tr>
               </thead>
               <tbody>
@@ -173,6 +187,16 @@
                     <tr class="border-t border-slate-800">
                       <td class="px-2 py-1 text-slate-200">{{ p.proxy_name }}</td>
                       <td class="px-2 py-1"><code class="block max-w-xl truncate text-slate-400" title="{{ p.uri }}">{{ p.uri }}</code></td>
+                      <td class="px-2 py-1 text-[11px]">
+                        {% set s = subscription_preview.ping_stats.get(p.proxy_name) if subscription_preview.ping_stats else None %}
+                        {% if s and s.alive > 0 %}
+                          <span class="text-emerald-300">{{ s.alive }}/{{ s.total }} alive{% if s.best_ms is not none %}, best {{ s.best_ms }}ms{% endif %}</span>
+                        {% elif s and s.error %}
+                          <span class="text-red-300" title="{{ s.error }}">fail</span>
+                        {% else %}
+                          <span class="text-slate-500">n/a</span>
+                        {% endif %}
+                      </td>
                     </tr>
                   {% endif %}
                 {% endfor %}
@@ -320,8 +344,12 @@
                     {% if s.node_stats and s.node_stats.get(u) %}
                       <div class="text-[10px] text-slate-500">
                         status={{ s.node_stats.get(u).last_status or "unknown" }},
-                        streak={{ s.node_stats.get(u).fail_streak }},
+                        fail_streak={{ s.node_stats.get(u).fail_streak }},
+                        recover_streak={{ s.node_stats.get(u).recover_streak }},
                         delay={{ s.node_stats.get(u).last_delay_ms if s.node_stats.get(u).last_delay_ms is not none else "-" }}
+                      </div>
+                      <div class="text-[10px] text-slate-500">
+                        return rule: healthy and recover_streak >= {{ settings.auto_filter_recover_streak }}
                       </div>
                     {% endif %}
                   </div>
@@ -337,7 +365,7 @@
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
     <h2 class="text-lg font-medium text-slate-100">Auto-filter LB</h2>
     <p class="mt-1 text-sm text-slate-400">
-      Управление фильтрацией подписочных узлов для LB-провайдера.
+      Управление фильтрацией подписочных узлов для LB-провайдера. Группа failover/full не фильтруется авто-логикой web4mihomo и остается под выбором mihomo (кроме ручного exclude).
     </p>
     <form
       class="mt-4 flex flex-wrap items-end gap-3"
@@ -388,6 +416,17 @@
           class="h-10 w-28 rounded-md border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
         />
       </label>
+      <label class="flex items-center gap-2 text-sm text-slate-300">
+        <span>Recover streak</span>
+        <input
+          name="recover_streak"
+          type="number"
+          min="1"
+          max="20"
+          value="{{ settings.auto_filter_recover_streak }}"
+          class="h-10 w-24 rounded-md border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        />
+      </label>
       <button
         type="submit"
         class="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500"
@@ -395,6 +434,11 @@
         Сохранить
       </button>
     </form>
+    <div class="mt-3 rounded-md border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">
+      <strong class="text-slate-200">Что означает Recover streak:</strong>
+      узел, который попал в auto-exclude, вернется в LB только после N подряд успешных проверок (healthy).
+      Большое значение снижает дребезг, но дольше держит узел вне LB.
+    </div>
   </section>
 
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
@@ -435,9 +479,25 @@
           <span class="max-w-xs text-right text-[10px] leading-tight text-slate-500"
             >Только задержка по строкам таблицы. Узлы не добавляет — сначала «Добавить» или пустой JSON + «Синхронизировать» (импорт из YAML).</span
           >
+          <form class="mt-1 flex items-center gap-1" hx-post="/htmx/test-all/repeat" hx-target="#dashboard-root" hx-swap="innerHTML">
+            <input
+              name="rounds"
+              type="number"
+              min="2"
+              max="10"
+              value="3"
+              class="h-7 w-14 rounded-md border border-slate-700 bg-slate-950 px-2 text-[11px] text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+            />
+            <button
+              type="submit"
+              class="rounded-md border border-slate-600 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
+            >
+              Delay xN
+            </button>
+          </form>
           {% if settings.auto_filter_enabled %}
             <span class="max-w-xs text-right text-[10px] leading-tight text-orange-300/90"
-              >Auto-filter ON ({{ settings.auto_filter_source }}, {{ settings.auto_filter_recheck_interval_sec }}s): slow/failed subscription nodes auto-excluded after Delay: все.</span
+              >Auto-filter ON ({{ settings.auto_filter_source }}, {{ settings.auto_filter_recheck_interval_sec }}s, recover={{ settings.auto_filter_recover_streak }}): slow/failed subscription nodes auto-excluded in LB after Delay: все.</span
             >
           {% endif %}
         </div>

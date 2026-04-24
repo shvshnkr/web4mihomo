@@ -87,6 +87,7 @@ class ProxyStore(BaseModel):
     ui_auto_filter_max_delay_ms: int | None = Field(default=None, ge=100, le=120000)
     ui_auto_filter_source: Literal["delay", "mihomo", "hybrid"] | None = None
     ui_auto_filter_recheck_interval_sec: int | None = Field(default=None, ge=30, le=86400)
+    ui_auto_filter_recover_streak: int | None = Field(default=None, ge=1, le=20)
 
 
 class AddProxyForm(BaseModel):
