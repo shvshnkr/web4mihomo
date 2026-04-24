@@ -248,6 +248,17 @@
           class="h-10 w-28 rounded-md border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
         />
       </label>
+      <label class="flex items-center gap-2 text-sm text-slate-300">
+        <span>Источник</span>
+        <select
+          name="source"
+          class="h-10 rounded-md border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
+        >
+          <option value="hybrid" {% if settings.auto_filter_source == "hybrid" %}selected{% endif %}>hybrid (рекомендуется)</option>
+          <option value="delay" {% if settings.auto_filter_source == "delay" %}selected{% endif %}>delay only</option>
+          <option value="mihomo" {% if settings.auto_filter_source == "mihomo" %}selected{% endif %}>mihomo health only</option>
+        </select>
+      </label>
       <button
         type="submit"
         class="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500"
@@ -297,7 +308,7 @@
           >
           {% if settings.auto_filter_enabled %}
             <span class="max-w-xs text-right text-[10px] leading-tight text-orange-300/90"
-              >Auto-filter ON: slow/failed subscription nodes auto-excluded after Delay: все.</span
+              >Auto-filter ON ({{ settings.auto_filter_source }}): slow/failed subscription nodes auto-excluded after Delay: все.</span
             >
           {% endif %}
         </div>

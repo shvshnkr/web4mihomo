@@ -74,6 +74,7 @@ sudo UNIT_NAME=web4mihomo APP_DIR=/etc/mihomo/web4mihomo APP_USER=root APP_GROUP
 | `AUTO_FILTER_FAIL_STREAK` | Сколько подряд провалов нужно для авто-исключения |
 | `AUTO_FILTER_RECHECK_INTERVAL_SEC` | Рекомендуемый интервал автопроверки |
 | `AUTO_FILTER_PROBE_URL` | Рекомендуемый URL для delay-отбора |
+| `AUTO_FILTER_SOURCE` | Источник решений авто-фильтра: `delay`, `mihomo`, `hybrid` (по умолчанию `hybrid`) |
 | `WEB4_VERBOSE_LOG` | `true` / `false` — подробные логи в консоль |
 
 Каталоги `data/` и файл `.env` в **`.gitignore`** — при обновлении с `git pull` локальные прокси и секреты не перезаписываются.
@@ -142,6 +143,7 @@ proxy-groups:
 - Узлы подписок с `503/504/timeout` или `delay > AUTO_FILTER_MAX_DELAY_MS` автоматически попадают в `auto_excluded_uris`.
 - При следующем sync такие узлы не попадают в **LB provider**, и группа `WEB4_LB` работает по очищенному набору.
 - `Delay: все` выполняет recheck для уже auto-excluded subscription-узлов, чтобы они могли автоматически вернуться в LB после стабилизации.
+- Режим `AUTO_FILTER_SOURCE=hybrid` учитывает оба сигнала (`Delay all` + `/proxies` health из mihomo): деградация срабатывает консервативно, возврат в LB требует стабильного здоровья (anti-flap через recovery streak).
 
 Рекомендованные стартовые значения:
 

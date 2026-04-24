@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
@@ -64,9 +65,37 @@ def _effective_settings(settings: SettingsDep, store: ProxyStore) -> SettingsDep
         updates["auto_filter_enabled"] = store.ui_auto_filter_enabled
     if store.ui_auto_filter_max_delay_ms is not None:
         updates["auto_filter_max_delay_ms"] = store.ui_auto_filter_max_delay_ms
+    if store.ui_auto_filter_source is not None:
+        updates["auto_filter_source"] = store.ui_auto_filter_source
     if not updates:
         return settings
     return settings.model_copy(update=updates)
+
+
+def _extract_mihomo_delay_map(payload: dict[str, Any]) -> dict[str, int | None]:
+    out: dict[str, int | None] = {}
+    proxies = payload.get("proxies")
+    if not isinstance(proxies, dict):
+        return out
+    for name, node in proxies.items():
+        if not isinstance(name, str) or not isinstance(node, dict):
+            continue
+        delay_value: int | None = None
+        history = node.get("history")
+        if isinstance(history, list):
+            for row in reversed(history):
+                if isinstance(row, dict):
+                    maybe = row.get("delay")
+                    if isinstance(maybe, (int, float)):
+                        delay_value = int(maybe)
+                        break
+        if delay_value is not None:
+            out[name] = delay_value if delay_value > 0 else None
+            continue
+        alive = node.get("alive")
+        if alive is False:
+            out[name] = None
+    return out
 
 
 def _render_dashboard(
@@ -131,6 +160,7 @@ async def htmx_add(
                 subscriptions=store.subscriptions,
                 ui_auto_filter_enabled=store.ui_auto_filter_enabled,
                 ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+                ui_auto_filter_source=store.ui_auto_filter_source,
             )
             added += 1
             log.info("  строка %d: добавлен узел «%s»", idx, name)
@@ -191,6 +221,7 @@ async def htmx_subscription_add(
             subscriptions=store.subscriptions,
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
     else:
         store = ProxyStore(
@@ -201,6 +232,7 @@ async def htmx_subscription_add(
             ],
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
     updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
     st.save(updated)
@@ -267,6 +299,7 @@ async def htmx_subscription_delete(
         subscriptions=[s for s in store.subscriptions if s.id != subscription_id],
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
     )
     if len(store.subscriptions) == before:
         return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
@@ -373,13 +406,18 @@ async def htmx_auto_filter_config(
     _: None = Depends(require_ui_session_htmx),
     enabled: str = Form(""),
     max_delay_ms: int = Form(1500),
+    source: str = Form("hybrid"),
 ):
     st = _store(settings)
     store = st.load()
     is_enabled = str(enabled).lower() in {"1", "true", "on", "yes"}
     max_delay = max(100, min(120000, int(max_delay_ms or 1500)))
+    src = (source or "hybrid").strip().lower()
+    if src not in {"delay", "mihomo", "hybrid"}:
+        src = "hybrid"
     store.ui_auto_filter_enabled = is_enabled
     store.ui_auto_filter_max_delay_ms = max_delay
+    store.ui_auto_filter_source = src
     _dbg(
         "H11",
         "app/routers/actions.py:htmx_auto_filter_config",
@@ -387,8 +425,10 @@ async def htmx_auto_filter_config(
         {
             "enabled": is_enabled,
             "max_delay_ms": max_delay,
+            "source": src,
             "store_value_enabled": store.ui_auto_filter_enabled,
             "store_value_max_delay_ms": store.ui_auto_filter_max_delay_ms,
+            "store_value_source": store.ui_auto_filter_source,
         },
     )
     if not is_enabled:
@@ -396,7 +436,7 @@ async def htmx_auto_filter_config(
             s.auto_excluded_uris = []
     updated, err = await persist_and_reload(settings, store, refresh_subscriptions=False)
     st.save(updated)
-    msg = f"Auto-filter {'включен' if is_enabled else 'выключен'}, порог {max_delay} ms."
+    msg = f"Auto-filter {'включен' if is_enabled else 'выключен'}, порог {max_delay} ms, source={src}."
     if err:
         msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
     return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
@@ -417,6 +457,7 @@ async def htmx_delete(
         subscriptions=store.subscriptions,
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
     )
     st.save(store)
     updated, err = await persist_and_reload(settings, store)
@@ -596,6 +637,7 @@ async def htmx_test_all(
             subscriptions=[s.model_copy(deep=True) for s in store.subscriptions],
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
         _dbg(
             "H12",
@@ -649,7 +691,30 @@ async def htmx_test_all(
             "total": len(store_for_test.proxies),
         },
     )
-    store_for_test = apply_auto_filter_policy(store_for_test, effective_settings)
+    mihomo_delay_map: dict[str, int | None] | None = None
+    if effective_settings.auto_filter_enabled and effective_settings.auto_filter_source in {"mihomo", "hybrid"}:
+        try:
+            payload = await client.get_proxies_payload()
+            mihomo_delay_map = _extract_mihomo_delay_map(payload)
+            _dbg(
+                "H13",
+                "app/routers/actions.py:htmx_test_all",
+                "test_all_mihomo_health_loaded",
+                {"signals": len(mihomo_delay_map)},
+            )
+        except Exception as e:
+            _dbg(
+                "H13",
+                "app/routers/actions.py:htmx_test_all",
+                "test_all_mihomo_health_error",
+                {"exc_type": type(e).__name__, "exc": str(e)},
+            )
+            log.warning("test-all: failed to load /proxies health map: %s", e)
+    store_for_test = apply_auto_filter_policy(
+        store_for_test,
+        effective_settings,
+        mihomo_delay_map=mihomo_delay_map,
+    )
     _dbg(
         "H10",
         "app/routers/actions.py:htmx_test_all",

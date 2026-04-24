@@ -89,6 +89,7 @@ class StoreJson:
             subscriptions=store.subscriptions,
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
         self.save(store)
         return store
@@ -99,6 +100,7 @@ class StoreJson:
             subscriptions=store.subscriptions,
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
         self.save(store)
         return store
@@ -109,6 +111,7 @@ class StoreJson:
             subscriptions=store.subscriptions,
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
         self.save(store)
         return store
@@ -127,6 +130,7 @@ class StoreJson:
             subscriptions=subs,
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
         self.save(store)
         return store
@@ -137,6 +141,7 @@ class StoreJson:
             subscriptions=[s for s in store.subscriptions if s.id != subscription_id],
             ui_auto_filter_enabled=store.ui_auto_filter_enabled,
             ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+            ui_auto_filter_source=store.ui_auto_filter_source,
         )
         self.save(store)
         return store

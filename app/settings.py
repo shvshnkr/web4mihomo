@@ -38,6 +38,7 @@ If the provider file lives outside mihomo's home directory, set the
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -166,6 +167,10 @@ class Settings(BaseSettings):
     auto_filter_probe_url: str = Field(
         default="http://cp.cloudflare.com/generate_204",
         description="Preferred probe URL for auto-filter checks.",
+    )
+    auto_filter_source: Literal["delay", "mihomo", "hybrid"] = Field(
+        default="hybrid",
+        description="Source for auto-filter decisions: delay, mihomo, or hybrid.",
     )
 
     @property

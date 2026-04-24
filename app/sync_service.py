@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 import httpx
 import yaml
@@ -102,6 +103,7 @@ def hydrate_store_from_provider_yaml(store: ProxyStore, settings: Settings) -> P
         subscriptions=store.subscriptions,
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
     )
 
 
@@ -212,6 +214,7 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
         subscriptions=updated_subs,
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
     )
     _dbg(
         "H3",
@@ -228,7 +231,55 @@ def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool)
     return out
 
 
-def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStore:
+def _delay_status(delay_ms: int | None, threshold_ms: int) -> Literal["healthy", "high-delay", "failed"]:
+    if delay_ms is None or delay_ms <= 0:
+        return "failed"
+    if delay_ms > threshold_ms:
+        return "high-delay"
+    return "healthy"
+
+
+def _mihomo_status(
+    proxy_name: str,
+    *,
+    mihomo_delay_map: dict[str, int | None] | None,
+    threshold_ms: int,
+) -> Literal["healthy", "high-delay", "failed", "unknown"]:
+    if not mihomo_delay_map or proxy_name not in mihomo_delay_map:
+        return "unknown"
+    return _delay_status(mihomo_delay_map.get(proxy_name), threshold_ms)
+
+
+def _resolve_status(
+    *,
+    source: str,
+    delay_status: Literal["healthy", "high-delay", "failed"],
+    mihomo_status: Literal["healthy", "high-delay", "failed", "unknown"],
+) -> Literal["healthy", "high-delay", "failed"]:
+    if source == "delay":
+        return delay_status
+    if source == "mihomo":
+        if mihomo_status == "unknown":
+            return delay_status
+        return mihomo_status
+
+    # Hybrid mode: conservative on degradation, stable on recovery.
+    if delay_status == "failed" or mihomo_status == "failed":
+        return "failed"
+    if delay_status == "high-delay" or mihomo_status == "high-delay":
+        return "high-delay"
+    if delay_status == "healthy" and mihomo_status in {"healthy", "unknown"}:
+        return "healthy"
+    # Fallback to delay source if mihomo has no fresh data.
+    return delay_status
+
+
+def apply_auto_filter_policy(
+    store: ProxyStore,
+    settings: Settings,
+    *,
+    mihomo_delay_map: dict[str, int | None] | None = None,
+) -> ProxyStore:
     """Update auto-excluded URIs using latest Delay-all results."""
     _dbg(
         "H9",
@@ -236,6 +287,7 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
         "auto_filter_start",
         {
             "enabled": settings.auto_filter_enabled,
+            "source": settings.auto_filter_source,
             "max_delay_ms": settings.auto_filter_max_delay_ms,
             "fail_streak_threshold": settings.auto_filter_fail_streak,
             "proxies_total": len(store.proxies),
@@ -267,19 +319,29 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
         stat = sub.node_stats.get(uri, SubscriptionNodeStats())
         stat.last_checked_at = now
         stat.last_delay_ms = p.last_delay_ms
+        delay_status = _delay_status(p.last_delay_ms, settings.auto_filter_max_delay_ms)
+        m_status = _mihomo_status(
+            p.proxy_name,
+            mihomo_delay_map=mihomo_delay_map,
+            threshold_ms=settings.auto_filter_max_delay_ms,
+        )
+        resolved_status = _resolve_status(
+            source=settings.auto_filter_source,
+            delay_status=delay_status,
+            mihomo_status=m_status,
+        )
+        stat.last_status = resolved_status
 
-        if p.last_delay_ms is None:
-            stat.last_status = "failed"
+        if resolved_status in {"failed", "high-delay"}:
             stat.fail_streak += 1
-        elif p.last_delay_ms > settings.auto_filter_max_delay_ms:
-            stat.last_status = "high-delay"
-            stat.fail_streak = max(1, stat.fail_streak + 1)
+            stat.recover_streak = 0
         else:
-            stat.last_status = "healthy"
             stat.fail_streak = 0
+            stat.recover_streak += 1
 
         sub.node_stats[uri] = stat
 
+    recovery_streak_threshold = 2
     for sub in updated_subs:
         manual_excluded = {u.strip() for u in sub.excluded_uris if u and u.strip()}
         auto_excluded = {u.strip() for u in sub.auto_excluded_uris if u and u.strip()}
@@ -289,7 +351,7 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
             should_exclude = stat.last_status == "high-delay" or stat.fail_streak >= settings.auto_filter_fail_streak
             if should_exclude:
                 auto_excluded.add(uri)
-            elif stat.last_status == "healthy":
+            elif stat.last_status == "healthy" and stat.recover_streak >= recovery_streak_threshold:
                 auto_excluded.discard(uri)
         sub.auto_excluded_uris = sorted(auto_excluded)
 
@@ -298,6 +360,7 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
         subscriptions=updated_subs,
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=store.ui_auto_filter_source,
     )
     _dbg(
         "H9",
@@ -307,6 +370,7 @@ def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStor
             "tracked_nodes": sum(len(s.node_stats) for s in updated_subs),
             "auto_excluded_total": sum(len(s.auto_excluded_uris) for s in updated_subs),
             "manual_excluded_total": sum(len(s.excluded_uris) for s in updated_subs),
+            "mihomo_signals_total": len(mihomo_delay_map or {}),
         },
     )
     return result

@@ -1,6 +1,7 @@
 """Pydantic models for persisted proxies, subscriptions and API payloads."""
 
 import uuid
+from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -51,6 +52,7 @@ class SubscriptionNodeStats(BaseModel):
     last_delay_ms: int | None = None
     last_status: str | None = None
     fail_streak: int = 0
+    recover_streak: int = 0
     last_checked_at: str | None = None
 
 
@@ -83,6 +85,7 @@ class ProxyStore(BaseModel):
     subscriptions: list[StoredSubscription] = Field(default_factory=list)
     ui_auto_filter_enabled: bool | None = None
     ui_auto_filter_max_delay_ms: int | None = Field(default=None, ge=100, le=120000)
+    ui_auto_filter_source: Literal["delay", "mihomo", "hybrid"] | None = None
 
 
 class AddProxyForm(BaseModel):
@@ -109,6 +112,7 @@ class AddSubscriptionForm(BaseModel):
 class AutoFilterForm(BaseModel):
     enabled: bool = False
     max_delay_ms: int = Field(default=1500, ge=100, le=120000)
+    source: Literal["delay", "mihomo", "hybrid"] = "hybrid"
 
 
 class LoginForm(BaseModel):

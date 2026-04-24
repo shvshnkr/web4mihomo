@@ -19,6 +19,22 @@ PORT="${PORT:-8800}"
 
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}.service"
 
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Run as root (for /etc/systemd/system and systemctl)." >&2
+  echo "Example: sudo bash scripts/install-systemd-unit.sh" >&2
+  exit 1
+fi
+
+if ! id -u "${APP_USER}" >/dev/null 2>&1; then
+  echo "APP_USER does not exist: ${APP_USER}" >&2
+  exit 1
+fi
+
+if ! getent group "${APP_GROUP}" >/dev/null 2>&1; then
+  echo "APP_GROUP does not exist: ${APP_GROUP}" >&2
+  exit 1
+fi
+
 if [[ ! -d "${APP_DIR}" ]]; then
   echo "APP_DIR does not exist: ${APP_DIR}" >&2
   exit 1
