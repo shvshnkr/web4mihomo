@@ -10,7 +10,7 @@
   <section class="rounded-xl border border-slate-800 bg-slate-900/30 p-6">
     <h2 class="text-lg font-medium text-slate-100">Добавить прокси</h2>
     <p class="mt-1 text-sm text-slate-400">
-      Вставьте одну или несколько ссылок <code class="text-slate-300">vless://</code> (не подписку) — по
+      Вставьте одну или несколько ссылок <code class="text-slate-300">vless://</code> или <code class="text-slate-300">trojan://</code> (не подписку) — по
       <strong>одной на строку</strong>. Строки с <code class="text-slate-400">#</code> в начале считаются комментарием.
     </p>
     <form
@@ -24,7 +24,7 @@
         <textarea
           name="link"
           rows="8"
-          placeholder="vless://...&#10;vless://..."
+          placeholder="vless://...&#10;trojan://..."
           class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none ring-emerald-500/30 focus:ring-2"
         ></textarea>
       </label>
@@ -97,6 +97,9 @@
                 {% endif %}
                 {% if s.excluded_uris %}
                   <div class="text-[10px] text-amber-300">excluded: {{ s.excluded_uris|length }}</div>
+                {% endif %}
+                {% if s.auto_excluded_uris %}
+                  <div class="text-[10px] text-orange-300">auto-excluded: {{ s.auto_excluded_uris|length }}</div>
                 {% endif %}
               </td>
               <td class="px-2 py-2 text-xs">{{ s.links|length }}</td>
@@ -176,6 +179,38 @@
               </div>
             </details>
           {% endif %}
+          {% if s.auto_excluded_uris %}
+            <details class="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+              <summary class="cursor-pointer text-xs text-slate-300">
+                Auto-excluded: {{ s.name or s.url }} ({{ s.auto_excluded_uris|length }})
+              </summary>
+              <div class="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  class="rounded-md border border-emerald-900/50 px-2 py-1 text-[10px] text-emerald-200 hover:bg-emerald-950/30"
+                  hx-post="/htmx/subscription/{{ s.id }}/restore-auto"
+                  hx-target="#dashboard-root"
+                  hx-swap="innerHTML"
+                >
+                  Restore all auto-excluded
+                </button>
+              </div>
+              <div class="mt-2 space-y-2">
+                {% for u in s.auto_excluded_uris %}
+                  <div class="rounded border border-slate-800 bg-slate-900/40 px-2 py-1">
+                    <code class="block truncate text-[10px] text-slate-300" title="{{ u }}">{{ u }}</code>
+                    {% if s.node_stats and s.node_stats.get(u) %}
+                      <div class="text-[10px] text-slate-500">
+                        status={{ s.node_stats.get(u).last_status or "unknown" }},
+                        streak={{ s.node_stats.get(u).fail_streak }},
+                        delay={{ s.node_stats.get(u).last_delay_ms if s.node_stats.get(u).last_delay_ms is not none else "-" }}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </details>
+          {% endif %}
         {% endfor %}
       </div>
     {% endif %}
@@ -219,13 +254,22 @@
           <span class="max-w-xs text-right text-[10px] leading-tight text-slate-500"
             >Только задержка по строкам таблицы. Узлы не добавляет — сначала «Добавить» или пустой JSON + «Синхронизировать» (импорт из YAML).</span
           >
+          {% if settings.auto_filter_enabled %}
+            <span class="max-w-xs text-right text-[10px] leading-tight text-orange-300/90"
+              >Auto-filter ON: slow/failed subscription nodes auto-excluded after Delay: все.</span
+            >
+          {% endif %}
         </div>
       </div>
     </div>
     <div class="mt-2 text-right text-xs text-slate-500">
       <div>
-        Провайдер YAML:
+        Провайдер YAML (full):
         <code class="text-slate-400">{{ settings.provider_yaml_path }}</code>
+      </div>
+      <div class="mt-1">
+        Провайдер YAML (LB):
+        <code class="text-slate-400">{{ settings.provider_lb_yaml_path }}</code>
       </div>
       <div class="mt-1">
         JSON store:

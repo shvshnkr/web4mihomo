@@ -44,6 +44,15 @@ class SubscriptionUser(BaseModel):
     userStatus: str | None = None
 
 
+class SubscriptionNodeStats(BaseModel):
+    """Per-URI health snapshot used by auto-filter."""
+
+    last_delay_ms: int | None = None
+    last_status: str | None = None
+    fail_streak: int = 0
+    last_checked_at: str | None = None
+
+
 class StoredSubscription(BaseModel):
     """Saved subscription endpoint and latest fetched snapshot."""
 
@@ -56,6 +65,11 @@ class StoredSubscription(BaseModel):
         default_factory=list,
         description="Sticky exclude list for subscription URIs.",
     )
+    auto_excluded_uris: list[str] = Field(
+        default_factory=list,
+        description="Auto-filtered URIs (operational excludes).",
+    )
+    node_stats: dict[str, SubscriptionNodeStats] = Field(default_factory=dict)
     user: SubscriptionUser | None = None
     last_refresh_at: str | None = None
     last_error: str | None = None

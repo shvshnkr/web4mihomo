@@ -13,11 +13,10 @@ from fastapi.templating import Jinja2Templates
 from app.deps import SettingsDep, require_ui_session_htmx
 from app.mihomo_client import MihomoAPIError, MihomoClient
 from app.models import AddProxyForm, AddSubscriptionForm, ProxyStore, StoredProxy, StoredSubscription
+from app.uri_to_proxy import build_proxy_dict_from_uri, suggest_proxy_name_from_uri
 from app.store_json import StoreJson
-from app.sync_service import persist_and_reload, unique_proxy_name_from_store
+from app.sync_service import apply_auto_filter_policy, persist_and_reload, unique_proxy_name_from_store
 from app.vless_bulk import split_bulk_vless_lines
-from app.vless_uri import parse_vless_uri
-from app.vless_to_proxy import suggest_proxy_name, to_mihomo_proxy
 
 log = logging.getLogger("web4mihomo.actions")
 
@@ -93,7 +92,7 @@ async def htmx_add(
             request,
             settings,
             store,
-            message="Вставьте хотя бы одну строку с vless:// (можно несколько, по одной на строку).",
+            message="Вставьте хотя бы одну строку с vless:// или trojan:// (можно несколько, по одной на строку).",
             message_kind="error",
         )
 
@@ -101,14 +100,14 @@ async def htmx_add(
     added = 0
     for idx, line in enumerate(lines, start=1):
         log.debug("  строка %d: начало разбора (первые 72 символа): %r", idx, line[:72])
-        if not line.lower().startswith("vless://"):
-            errors.append(f"Строка {idx}: не vless:// — пропуск.")
+        low = line.lower()
+        if not (low.startswith("vless://") or low.startswith("trojan://")):
+            errors.append(f"Строка {idx}: не vless:// и не trojan:// — пропуск.")
             continue
         try:
-            parsed = parse_vless_uri(line)
-            base_name = suggest_proxy_name(parsed)
+            base_name = suggest_proxy_name_from_uri(line)
             name = unique_proxy_name_from_store(store, base_name)
-            to_mihomo_proxy(parsed, name)
+            build_proxy_dict_from_uri(line, name)
             item = StoredProxy(uri=line, proxy_name=name, proxy_payload=None)
             store = ProxyStore(proxies=[*store.proxies, item])
             added += 1
@@ -315,6 +314,27 @@ async def htmx_subscription_restore_uri(
     return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
 
 
+@router.post("/subscription/{subscription_id}/restore-auto", response_class=HTMLResponse)
+async def htmx_subscription_restore_auto(
+    request: Request,
+    subscription_id: str,
+    settings: SettingsDep,
+    _: None = Depends(require_ui_session_htmx),
+):
+    st = _store(settings)
+    store = st.load()
+    sub = next((s for s in store.subscriptions if s.id == subscription_id), None)
+    if not sub:
+        return _render_dashboard(request, settings, store, message="Подписка не найдена.", message_kind="error")
+    sub.auto_excluded_uris = []
+    updated, err = await persist_and_reload(settings, store, refresh_subscriptions=True)
+    st.save(updated)
+    msg = "Auto-exclude очищен для подписки."
+    if err:
+        msg = f"{msg}\n\nmihomo не перезагрузил провайдер: {err}"
+    return _render_dashboard(request, settings, updated, message=msg, message_kind="error" if err else "info")
+
+
 @router.delete("/proxy/{proxy_id}", response_class=HTMLResponse)
 async def htmx_delete(
     request: Request,
@@ -472,6 +492,7 @@ async def htmx_test_all(
 
     client = MihomoClient(settings)
     sem = asyncio.Semaphore(settings.test_all_concurrency)
+    test_url = settings.auto_filter_probe_url if settings.auto_filter_enabled else settings.delay_test_url
     _dbg(
         "H4",
         "app/routers/actions.py:htmx_test_all",
@@ -484,7 +505,7 @@ async def htmx_test_all(
             try:
                 ms = await client.proxy_delay_ms(
                     p.proxy_name,
-                    test_url=settings.delay_test_url,
+                    test_url=test_url,
                     timeout_ms=settings.delay_timeout_ms,
                     expected=settings.delay_test_expected,
                 )
@@ -492,6 +513,7 @@ async def htmx_test_all(
                 p.last_sync_error = None
             except MihomoAPIError:
                 p.last_delay_ms = None
+                p.last_sync_error = "Delay failed"
             except Exception as e:
                 _dbg(
                     "H4",
@@ -503,12 +525,20 @@ async def htmx_test_all(
                 p.last_sync_error = f"Delay error: {type(e).__name__}"
 
     await asyncio.gather(*(one(p) for p in store.proxies))
-    st.save(store)
+    store = apply_auto_filter_policy(store, settings)
+    updated, err = await persist_and_reload(settings, store)
+    st.save(updated)
     log.info("POST /htmx/test-all: завершено для %d узлов", len(store.proxies))
+    auto_excluded = sum(len(s.auto_excluded_uris) for s in updated.subscriptions)
+    msg = "Проверка задержек завершена."
+    if settings.auto_filter_enabled:
+        msg += f" Auto-excluded: {auto_excluded}."
+    if err:
+        msg += f"\n\nmihomo не перезагрузил провайдер: {err}"
     return _render_dashboard(
         request,
         settings,
-        store,
-        message="Проверка задержек завершена.",
-        message_kind="info",
+        updated,
+        message=msg,
+        message_kind="error" if err else "info",
     )

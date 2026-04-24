@@ -65,9 +65,17 @@ class Settings(BaseSettings):
         default="web4mihomo_nodes",
         description="Name of the file proxy-provider in mihomo config.",
     )
+    provider_lb_name: str = Field(
+        default="web4mihomo_nodes_lb",
+        description="Name of the filtered LB proxy-provider in mihomo config.",
+    )
     provider_yaml_path: Path = Field(
         default=Path("data/web4mihomo_provider.yaml"),
         description="Абсолютный путь или относительно **корня проекта** (папка с main.py), не от cwd uvicorn.",
+    )
+    provider_lb_yaml_path: Path = Field(
+        default=Path("data/web4mihomo_provider_lb.yaml"),
+        description="Path for LB-only filtered provider YAML.",
     )
     json_store_path: Path = Field(
         default=Path("data/my_vless_proxies.json"),
@@ -79,6 +87,8 @@ class Settings(BaseSettings):
         """Относительные пути привязываем к каталогу проекта, чтобы cwd не ломал импорт/запись."""
         if not self.provider_yaml_path.is_absolute():
             self.provider_yaml_path = (_PROJECT_ROOT / self.provider_yaml_path).resolve()
+        if not self.provider_lb_yaml_path.is_absolute():
+            self.provider_lb_yaml_path = (_PROJECT_ROOT / self.provider_lb_yaml_path).resolve()
         if not self.json_store_path.is_absolute():
             self.json_store_path = (_PROJECT_ROOT / self.json_store_path).resolve()
         return self
@@ -131,6 +141,32 @@ class Settings(BaseSettings):
         le=120.0,
         description="HTTP timeout for subscription URL fetch.",
     )
+    auto_filter_enabled: bool = Field(
+        default=False,
+        description="Enable automatic subscription node filtering by delay/health.",
+    )
+    auto_filter_max_delay_ms: int = Field(
+        default=1500,
+        ge=100,
+        le=120000,
+        description="Delay threshold above which node is auto-excluded.",
+    )
+    auto_filter_fail_streak: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description="Consecutive failures required for auto-exclude.",
+    )
+    auto_filter_recheck_interval_sec: int = Field(
+        default=300,
+        ge=30,
+        le=86400,
+        description="Recommended interval for running Delay-all auto-filter cycles.",
+    )
+    auto_filter_probe_url: str = Field(
+        default="http://cp.cloudflare.com/generate_204",
+        description="Preferred probe URL for auto-filter checks.",
+    )
 
     @property
     def session_secret(self) -> str:
@@ -142,11 +178,21 @@ class Settings(BaseSettings):
 
     def bootstrap_yaml_hint(self) -> str:
         """Human-readable snippet for mihomo config (paths are examples)."""
-        path = str(self.provider_yaml_path).replace("\\", "/")
+        full_path = str(self.provider_yaml_path).replace("\\", "/")
+        lb_path = str(self.provider_lb_yaml_path).replace("\\", "/")
         return f"""proxy-providers:
   {self.provider_name}:
     type: file
-    path: {path}
+    path: {full_path}
+    interval: 0
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 600
+
+  {self.provider_lb_name}:
+    type: file
+    path: {lb_path}
     interval: 0
     health-check:
       enable: true
@@ -167,6 +213,6 @@ proxy-groups:
     type: load-balance
     strategy: consistent-hashing
     use:
-      - {self.provider_name}
+      - {self.provider_lb_name}
     url: https://www.gstatic.com/generate_204
 """

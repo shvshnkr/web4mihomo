@@ -1,4 +1,4 @@
-"""Разбор поля ввода: несколько строк vless://."""
+"""Разбор поля ввода: несколько строк URI (vless/trojan)."""
 
 
 def split_bulk_vless_lines(raw: str) -> list[str]:

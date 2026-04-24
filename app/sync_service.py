@@ -12,12 +12,11 @@ import httpx
 import yaml
 
 from app.mihomo_client import MihomoAPIError, MihomoClient
-from app.models import ProxyStore, StoredProxy, StoredSubscription
+from app.models import ProxyStore, StoredProxy, StoredSubscription, SubscriptionNodeStats
 from app.provider_render import render_provider_yaml
 from app.settings import Settings
 from app.subscription_client import SubscriptionFetchError, fetch_subscription_snapshot
-from app.vless_uri import parse_vless_uri
-from app.vless_to_proxy import suggest_proxy_name, to_mihomo_proxy
+from app.uri_to_proxy import build_proxy_dict_from_uri, suggest_proxy_name_from_uri
 
 log = logging.getLogger("web4mihomo.sync")
 
@@ -78,7 +77,7 @@ def hydrate_store_from_provider_yaml(store: ProxyStore, settings: Settings) -> P
     if not imported:
         return store
     log.info("hydrate: импортировано %d узл(ов) из %s в пустой JSON", len(imported), path)
-    return ProxyStore(proxies=imported)
+    return ProxyStore(proxies=imported, subscriptions=store.subscriptions)
 
 
 def build_proxy_dicts(store: ProxyStore) -> list[dict[str, Any]]:
@@ -90,8 +89,7 @@ def build_proxy_dicts(store: ProxyStore) -> list[dict[str, Any]]:
             d["name"] = item.proxy_name
             out.append(d)
         elif item.uri:
-            parsed = parse_vless_uri(item.uri)
-            out.append(to_mihomo_proxy(parsed, item.proxy_name))
+            out.append(build_proxy_dict_from_uri(item.uri, item.proxy_name))
     return out
 
 
@@ -118,20 +116,33 @@ async def refresh_enabled_subscriptions(store: ProxyStore, settings: Settings) -
     return updated
 
 
-def _build_subscription_proxies(sub: StoredSubscription, existing_names: set[str]) -> tuple[list[StoredProxy], str | None]:
+def _build_subscription_proxies(
+    sub: StoredSubscription,
+    existing_names: set[str],
+    *,
+    apply_excludes: bool,
+) -> tuple[list[StoredProxy], str | None]:
     """Create derived StoredProxy rows from subscription links."""
     built: list[StoredProxy] = []
     seen_uris: set[str] = set()
-    excluded = {u.strip() for u in sub.excluded_uris if u and u.strip()}
+    excluded: set[str] = set()
+    if apply_excludes:
+        excluded = {
+            u.strip()
+            for u in [*sub.excluded_uris, *sub.auto_excluded_uris]
+            if u and u.strip()
+        }
     parse_errors = 0
     for uri in sub.links:
         u = uri.strip()
-        if not u or u in excluded or u in seen_uris or not u.lower().startswith("vless://"):
+        if not u or u in excluded or u in seen_uris:
+            continue
+        low = u.lower()
+        if not (low.startswith("vless://") or low.startswith("trojan://")):
             continue
         seen_uris.add(u)
         try:
-            parsed = parse_vless_uri(u)
-            base_name = suggest_proxy_name(parsed)
+            base_name = suggest_proxy_name_from_uri(u)
             name = unique_proxy_name(base_name, existing_names)
             existing_names.add(name)
             built.append(
@@ -150,7 +161,7 @@ def _build_subscription_proxies(sub: StoredSubscription, existing_names: set[str
     return built, None
 
 
-def materialize_subscription_proxies(store: ProxyStore) -> ProxyStore:
+def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool) -> ProxyStore:
     """
     Keep manual proxies intact and rebuild subscription-derived proxies
     from current subscription links.
@@ -162,11 +173,65 @@ def materialize_subscription_proxies(store: ProxyStore) -> ProxyStore:
     for sub in updated_subs:
         if not sub.enabled:
             continue
-        built, parse_warn = _build_subscription_proxies(sub, existing_names)
+        built, parse_warn = _build_subscription_proxies(
+            sub,
+            existing_names,
+            apply_excludes=apply_excludes,
+        )
         generated.extend(built)
         if parse_warn and not sub.last_error:
             sub.last_error = parse_warn
     return ProxyStore(proxies=[*manual, *generated], subscriptions=updated_subs)
+
+
+def apply_auto_filter_policy(store: ProxyStore, settings: Settings) -> ProxyStore:
+    """Update auto-excluded URIs using latest Delay-all results."""
+    if not settings.auto_filter_enabled:
+        return store
+
+    now = datetime.now(timezone.utc).isoformat()
+    updated_subs = [s.model_copy(deep=True) for s in store.subscriptions]
+    subs_by_id = {s.id: s for s in updated_subs}
+
+    for p in store.proxies:
+        if p.source_type != "subscription" or not p.subscription_id or not p.uri:
+            continue
+        sub = subs_by_id.get(p.subscription_id)
+        if sub is None:
+            continue
+        uri = p.uri.strip()
+        if not uri:
+            continue
+        stat = sub.node_stats.get(uri, SubscriptionNodeStats())
+        stat.last_checked_at = now
+        stat.last_delay_ms = p.last_delay_ms
+
+        if p.last_delay_ms is None:
+            stat.last_status = "failed"
+            stat.fail_streak += 1
+        elif p.last_delay_ms > settings.auto_filter_max_delay_ms:
+            stat.last_status = "high-delay"
+            stat.fail_streak = max(1, stat.fail_streak + 1)
+        else:
+            stat.last_status = "healthy"
+            stat.fail_streak = 0
+
+        sub.node_stats[uri] = stat
+
+    for sub in updated_subs:
+        manual_excluded = {u.strip() for u in sub.excluded_uris if u and u.strip()}
+        auto_excluded = {u.strip() for u in sub.auto_excluded_uris if u and u.strip()}
+        for uri, stat in sub.node_stats.items():
+            if uri in manual_excluded:
+                continue
+            should_exclude = stat.last_status == "high-delay" or stat.fail_streak >= settings.auto_filter_fail_streak
+            if should_exclude:
+                auto_excluded.add(uri)
+            elif stat.last_status == "healthy":
+                auto_excluded.discard(uri)
+        sub.auto_excluded_uris = sorted(auto_excluded)
+
+    return ProxyStore(proxies=store.proxies, subscriptions=updated_subs)
 
 
 def write_provider_file(path: Path, proxies: list[dict[str, Any]]) -> None:
@@ -192,41 +257,51 @@ async def persist_and_reload(
     if refresh_subscriptions:
         store = await refresh_enabled_subscriptions(store, settings)
 
-    store = materialize_subscription_proxies(store)
     store = hydrate_store_from_provider_yaml(store, settings)
-    proxies = build_proxy_dicts(store)
+    store_full = materialize_subscription_proxies(store, apply_excludes=False)
+    store_lb = materialize_subscription_proxies(store, apply_excludes=True)
+
+    proxies_full = build_proxy_dicts(store_full)
+    proxies_lb = build_proxy_dicts(store_lb)
     log.debug(
-        "persist: записываю %d узл(ов) в %s, PUT provider=%r",
-        len(proxies),
+        "persist: full=%d -> %s; lb=%d -> %s",
+        len(proxies_full),
         settings.provider_yaml_path,
-        settings.provider_name,
+        len(proxies_lb),
+        settings.provider_lb_yaml_path,
     )
-    write_provider_file(settings.provider_yaml_path, proxies)
+    write_provider_file(settings.provider_yaml_path, proxies_full)
+    write_provider_file(settings.provider_lb_yaml_path, proxies_lb)
 
     sync_error: str | None = None
-    updated = store.model_copy(deep=True)
+    updated = store_lb.model_copy(deep=True)
+    errors: list[str] = []
+
     try:
         await client.provider_update(settings.provider_name)
-        log.debug("persist: PUT провайдера успешен")
-        for p in updated.proxies:
-            p.last_sync_error = None
     except MihomoAPIError as e:
         msg = str(e)
-        if not proxies and "doesn't have any proxy" in msg.lower():
-            sync_error = None
-        else:
-            sync_error = msg
-            for p in updated.proxies:
-                p.last_sync_error = sync_error
+        if not proxies_full and "doesn't have any proxy" not in msg.lower():
+            errors.append(f"{settings.provider_name}: {msg}")
     except httpx.HTTPError as e:
-        base = settings.mihomo_base_url.rstrip("/")
-        sync_error = (
-            f"Нет связи с mihomo ({base}): {e}. "
-            "Проверьте: сервис mihomo запущен; в конфиге указан external-controller с тем же хостом/портом; "
-            "в shell задан MIHOMO_BASE_URL (например http://127.0.0.1:9090), если порт не стандартный. "
-            f'Проверка: curl -sS -H "Authorization: Bearer <secret>" {base}/version'
-        )
+        errors.append(f"{settings.provider_name}: HTTP error: {e}")
+
+    if settings.provider_lb_name != settings.provider_name:
+        try:
+            await client.provider_update(settings.provider_lb_name)
+        except MihomoAPIError as e:
+            msg = str(e)
+            if not proxies_lb and "doesn't have any proxy" not in msg.lower():
+                errors.append(f"{settings.provider_lb_name}: {msg}")
+        except httpx.HTTPError as e:
+            errors.append(f"{settings.provider_lb_name}: HTTP error: {e}")
+
+    if errors:
+        sync_error = " | ".join(errors)
         for p in updated.proxies:
             p.last_sync_error = sync_error
+    else:
+        for p in updated.proxies:
+            p.last_sync_error = None
 
     return updated, sync_error
