@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -101,54 +102,70 @@ class MihomoClient:
             "delay_request_start",
             {"proxy_name": proxy_name, "timeout_ms": timeout_ms, "has_expected": bool(expected)},
         )
-        try:
-            async with self._client() as c:
-                r = await c.get(f"/proxies/{enc}/delay", params=params)
-        except httpx.HTTPError as e:
-            self._dbg(
-                "H1",
-                "app/mihomo_client.py:proxy_delay_ms",
-                "delay_request_exception",
-                {"proxy_name": proxy_name, "exc_type": type(e).__name__, "exc": str(e)},
-            )
-            raise MihomoAPIError(
-                f"delay request failed: {type(e).__name__}",
-                status_code=None,
-            ) from e
-        if r.status_code == 200:
-            data = r.json()
-            delay = int(data.get("delay", 0))
-            if delay <= 0:
-                raise MihomoAPIError("delay test returned non-positive delay")
+        retries = 2
+        backoff_sec = (0.35, 0.8)
+        attempt = 0
+
+        while True:
+            attempt += 1
+            try:
+                async with self._client() as c:
+                    r = await c.get(f"/proxies/{enc}/delay", params=params)
+            except httpx.HTTPError as e:
+                self._dbg(
+                    "H1",
+                    "app/mihomo_client.py:proxy_delay_ms",
+                    "delay_request_exception",
+                    {"proxy_name": proxy_name, "attempt": attempt, "exc_type": type(e).__name__, "exc": str(e)},
+                )
+                if attempt <= retries:
+                    await asyncio.sleep(backoff_sec[min(attempt - 1, len(backoff_sec) - 1)])
+                    continue
+                raise MihomoAPIError(
+                    f"delay request failed: {type(e).__name__}",
+                    status_code=None,
+                ) from e
+
+            if r.status_code == 200:
+                data = r.json()
+                delay = int(data.get("delay", 0))
+                if delay <= 0:
+                    raise MihomoAPIError("delay test returned non-positive delay")
+                self._dbg(
+                    "H2",
+                    "app/mihomo_client.py:proxy_delay_ms",
+                    "delay_status_200",
+                    {"proxy_name": proxy_name, "delay": delay, "attempt": attempt},
+                )
+                return delay
+
             self._dbg(
                 "H2",
                 "app/mihomo_client.py:proxy_delay_ms",
-                "delay_status_200",
-                {"proxy_name": proxy_name, "delay": delay},
+                "delay_non_200",
+                {"proxy_name": proxy_name, "status_code": r.status_code, "attempt": attempt},
             )
-            return delay
-        self._dbg(
-            "H2",
-            "app/mihomo_client.py:proxy_delay_ms",
-            "delay_non_200",
-            {"proxy_name": proxy_name, "status_code": r.status_code},
-        )
-        body = r.text
-        try:
-            data = r.json()
-            if isinstance(data, dict) and data.get("message"):
-                body = str(data["message"])
-        except Exception:
-            pass
-        hint = ""
-        if r.status_code == 503:
-            hint = (
-                " | Часто узел не достучался до тестового URL или обрыв TLS/Reality. "
-                "Попробуйте: DELAY_TEST_URL=http://cp.cloudflare.com/generate_204 "
-                "или https://1.1.1.1 , увеличьте DELAY_TIMEOUT_MS, смотрите логи mihomo "
-                "и проверьте тот же outbound в другом клиенте."
+            body = r.text
+            try:
+                data = r.json()
+                if isinstance(data, dict) and data.get("message"):
+                    body = str(data["message"])
+            except Exception:
+                pass
+
+            if r.status_code in {503, 504} and attempt <= retries:
+                await asyncio.sleep(backoff_sec[min(attempt - 1, len(backoff_sec) - 1)])
+                continue
+
+            hint = ""
+            if r.status_code in {503, 504}:
+                hint = (
+                    " | Часто узел не достучался до тестового URL или перегружен контроллер mihomo. "
+                    "Попробуйте: DELAY_TEST_URL=http://cp.cloudflare.com/generate_204 "
+                    "или https://1.1.1.1 , увеличьте DELAY_TIMEOUT_MS, уменьшите TEST_ALL_CONCURRENCY, "
+                    "и проверьте тот же outbound в другом клиенте."
+                )
+            raise MihomoAPIError(
+                f"delay test failed: {r.status_code} {body}{hint}",
+                status_code=r.status_code,
             )
-        raise MihomoAPIError(
-            f"delay test failed: {r.status_code} {body}{hint}",
-            status_code=r.status_code,
-        )

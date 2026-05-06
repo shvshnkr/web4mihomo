@@ -75,9 +75,9 @@ async def _auto_refresh_loop(settings: Settings) -> None:
                     expected=run_settings.delay_test_expected,
                 )
                 p.last_delay_error = None
-            except MihomoAPIError:
+            except MihomoAPIError as e:
                 p.last_delay_ms = None
-                p.last_delay_error = "Delay failed"
+                p.last_delay_error = str(e).strip() if str(e).strip() else "Delay failed"
             except Exception as e:
                 p.last_delay_ms = None
                 p.last_delay_error = f"Delay error: {type(e).__name__}"

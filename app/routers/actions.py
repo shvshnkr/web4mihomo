@@ -1035,9 +1035,9 @@ async def htmx_test_all(
                 )
                 p.last_delay_ms = ms
                 p.last_delay_error = None
-            except MihomoAPIError:
+            except MihomoAPIError as e:
                 p.last_delay_ms = None
-                p.last_delay_error = "Delay failed"
+                p.last_delay_error = str(e).strip() if str(e).strip() else "Delay failed"
             except Exception as e:
                 _dbg(
                     "H4",
@@ -1184,9 +1184,9 @@ async def htmx_test_all_repeat(
                 a = agg[p.id]
                 a["alive"] += 1
                 a["best_ms"] = ms if a["best_ms"] is None else min(a["best_ms"], ms)
-            except MihomoAPIError:
+            except MihomoAPIError as e:
                 p.last_delay_ms = None
-                p.last_delay_error = "Delay failed"
+                p.last_delay_error = str(e).strip() if str(e).strip() else "Delay failed"
 
     for _ in range(rounds):
         await asyncio.gather(*(one(p) for p in store_for_test.proxies))
