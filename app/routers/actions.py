@@ -816,9 +816,28 @@ async def htmx_delete(
     log.info("DELETE /htmx/proxy/%s", proxy_id)
     st = _store(settings)
     store = st.load()
+    item = next((p for p in store.proxies if p.id == proxy_id), None)
+    if not item:
+        return _render_dashboard(
+            request,
+            settings,
+            store,
+            message="Запись не найдена.",
+            message_kind="error",
+        )
+
+    subscriptions = [s.model_copy(deep=True) for s in store.subscriptions]
+    if item.source_type == "subscription" and item.subscription_id and item.uri:
+        sub = next((s for s in subscriptions if s.id == item.subscription_id), None)
+        if sub:
+            uri = _norm_uri(item.uri)
+            excluded = {_norm_uri(u) for u in sub.excluded_uris if _norm_uri(u)}
+            excluded.add(uri)
+            sub.excluded_uris = sorted(excluded)
+
     store = ProxyStore(
         proxies=[p for p in store.proxies if p.id != proxy_id],
-        subscriptions=store.subscriptions,
+        subscriptions=subscriptions,
         ui_auto_filter_enabled=store.ui_auto_filter_enabled,
         ui_auto_filter_max_delay_ms=store.ui_auto_filter_max_delay_ms,
         ui_auto_filter_source=store.ui_auto_filter_source,

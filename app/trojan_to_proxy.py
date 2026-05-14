@@ -69,4 +69,20 @@ def to_mihomo_trojan_proxy(parsed: ParsedTrojan, name: str) -> dict[str, Any]:
         if service_name:
             proxy["grpc-opts"] = {"grpc-service-name": service_name}
         return proxy
+    if network == "http":
+        path = get_param(p, "path") or "/"
+        host_header = get_param(p, "host", "obfs-host")
+        http_opts: dict[str, Any] = {"path": path}
+        if host_header:
+            http_opts["headers"] = {"Host": host_header}
+        proxy["http-opts"] = http_opts
+        return proxy
+    if network == "h2":
+        h2_path = get_param(p, "path") or "/"
+        h2_host = get_param(p, "host", "sni")
+        h2_opts: dict[str, Any] = {"path": h2_path}
+        if h2_host:
+            h2_opts["host"] = [h2_host]
+        proxy["h2-opts"] = h2_opts
+        return proxy
     raise ValueError(f"Неподдерживаемый Trojan transport/network: {network}")

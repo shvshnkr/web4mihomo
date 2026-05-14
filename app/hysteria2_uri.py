@@ -29,7 +29,17 @@ def parse_hysteria2_uri(raw: str) -> ParsedHysteria2:
     if scheme not in {"hysteria2", "hysteria"}:
         raise ValueError("Неверная схема URI")
 
+    qs = parse_qs(parsed.query, keep_blank_values=True)
     password = unquote(parsed.username or "")
+    if not password:
+        for raw_key, vals in qs.items():
+            lk = (raw_key or "").lower()
+            if lk not in {"password", "auth", "key"}:
+                continue
+            v = _first([unquote(x) for x in vals])
+            if v:
+                password = v
+                break
     if not password:
         raise ValueError("В ссылке отсутствует пароль Hysteria")
 
@@ -41,10 +51,11 @@ def parse_hysteria2_uri(raw: str) -> ParsedHysteria2:
         raise ValueError("В ссылке отсутствует port")
     port = int(parsed.port)
 
-    qs = parse_qs(parsed.query, keep_blank_values=True)
     params: dict[str, str] = {}
     for k, vals in qs.items():
         key = (k or "").lower()
+        if key in {"password", "auth", "key"}:
+            continue
         v = _first([unquote(x) for x in vals])
         if v is not None:
             params[key] = v

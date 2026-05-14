@@ -404,8 +404,10 @@ async def persist_and_reload(
     client: MihomoClient | None = None,
 ) -> tuple[ProxyStore, str | None]:
     """
-    Optionally pull rows from existing provider YAML if JSON is empty, then
-    write YAML and ``PUT`` provider reload.
+    Optionally refresh subscriptions, hydrate from provider YAML if JSON is empty,
+    materialize subscription rows, write **full** and **LB** provider YAML files,
+    reload mihomo providers, and return the **full** proxy list for JSON persistence
+    (same node set as ``web4mihomo_provider.yaml``).
     """
     if client is None:
         client = MihomoClient(settings)
@@ -500,7 +502,11 @@ async def persist_and_reload(
     )
 
     sync_error: str | None = None
-    updated = store_lb.model_copy(deep=True)
+    # Persist JSON + UI from the same materialization as the full provider YAML.
+    # LB YAML is still built from ``store_lb``; saving only ``store_lb`` here used to
+    # drop nodes that exist in the full file (e.g. auto-excluded subscription URIs),
+    # so manual hysteria2 / new links looked "unsaved" while full YAML differed.
+    updated = store_full.model_copy(deep=True)
     for p in updated.proxies:
         if p.source_type == "subscription" and p.subscription_id and p.uri:
             state = prev_sub_state_by_uri.get((p.subscription_id, p.uri.strip()))
