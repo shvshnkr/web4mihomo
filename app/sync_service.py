@@ -198,12 +198,50 @@ def _build_subscription_proxies(
     return built, None
 
 
+def _is_persisted_manual_row(p: StoredProxy) -> bool:
+    """True for user-owned rows that must not be dropped when subscription links refresh."""
+    if p.source_type != "subscription":
+        return True
+    # Legacy / mis-tagged rows: ``source_type`` subscription but no parent id (cannot re-fetch from links).
+    return p.subscription_id is None
+
+
+def merge_manual_proxies_from_latest(base: ProxyStore, latest: ProxyStore) -> ProxyStore:
+    """
+    Append manual rows present in ``latest`` JSON but missing from ``base`` (by id).
+
+    Long requests (e.g. test-all) may hold an older ``ProxyStore`` while the file gains
+    new manual nodes; without this, persist + save would overwrite them.
+    """
+    base_ids = {p.id for p in base.proxies}
+    extras = [
+        p.model_copy(deep=True)
+        for p in latest.proxies
+        if _is_persisted_manual_row(p) and p.id not in base_ids
+    ]
+    if not extras:
+        return base
+    log.info(
+        "merge_manual_proxies_from_latest: добавлено %d узл(ов) из свежего JSON (устаревший снимок)",
+        len(extras),
+    )
+    return ProxyStore(
+        proxies=[*base.proxies, *extras],
+        subscriptions=[s.model_copy(deep=True) for s in base.subscriptions],
+        ui_auto_filter_enabled=base.ui_auto_filter_enabled,
+        ui_auto_filter_max_delay_ms=base.ui_auto_filter_max_delay_ms,
+        ui_auto_filter_source=base.ui_auto_filter_source,
+        ui_auto_filter_recheck_interval_sec=base.ui_auto_filter_recheck_interval_sec,
+        ui_auto_filter_recover_streak=base.ui_auto_filter_recover_streak,
+    )
+
+
 def materialize_subscription_proxies(store: ProxyStore, *, apply_excludes: bool) -> ProxyStore:
     """
     Keep manual proxies intact and rebuild subscription-derived proxies
     from current subscription links.
     """
-    manual = [p for p in store.proxies if p.source_type != "subscription"]
+    manual = [p for p in store.proxies if _is_persisted_manual_row(p)]
     existing_names = {p.proxy_name for p in manual}
     generated: list[StoredProxy] = []
     updated_subs = [s.model_copy(deep=True) for s in store.subscriptions]

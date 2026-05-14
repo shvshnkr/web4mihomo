@@ -12,10 +12,16 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.logging_setup import configure_logging
 from app.mihomo_client import MihomoAPIError, MihomoClient
+from app.persist_lock import persist_cycle_lock
 from app.routers import actions, pages
 from app.settings import Settings
 from app.store_json import StoreJson
-from app.sync_service import apply_auto_filter_policy, materialize_subscription_proxies, persist_and_reload
+from app.sync_service import (
+    apply_auto_filter_policy,
+    materialize_subscription_proxies,
+    merge_manual_proxies_from_latest,
+    persist_and_reload,
+)
 
 log = logging.getLogger("web4mihomo.lifecycle")
 
@@ -113,12 +119,17 @@ async def _auto_refresh_loop(settings: Settings) -> None:
                     run_settings,
                     mihomo_delay_map=mihomo_delay_map,
                 )
-                updated, err = await persist_and_reload(run_settings, store_for_test, refresh_subscriptions=True)
+                async with persist_cycle_lock():
+                    store_for_test = merge_manual_proxies_from_latest(store_for_test, store_io.load())
+                    updated, err = await persist_and_reload(run_settings, store_for_test, refresh_subscriptions=True)
+                    store_io.save(updated)
             elif settings.subscriptions_auto_refresh_interval_sec > 0:
-                updated, err = await persist_and_reload(run_settings, store, refresh_subscriptions=True)
+                async with persist_cycle_lock():
+                    latest = merge_manual_proxies_from_latest(store, store_io.load())
+                    updated, err = await persist_and_reload(run_settings, latest, refresh_subscriptions=True)
+                    store_io.save(updated)
             else:
                 continue
-            store_io.save(updated)
             if err:
                 log.warning("auto-refresh: mihomo reload error: %s", err)
         except Exception as e:

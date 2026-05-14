@@ -16,10 +16,12 @@ from app.mihomo_client import MihomoAPIError, MihomoClient
 from app.models import AddProxyForm, AddSubscriptionForm, ProxyStore, StoredProxy, StoredSubscription
 from app.subscription_client import SubscriptionFetchError, fetch_subscription_snapshot
 from app.uri_to_proxy import build_proxy_dict_from_uri, scheme_of, suggest_proxy_name_from_uri
+from app.persist_lock import persist_cycle_lock
 from app.store_json import StoreJson
 from app.sync_service import (
     apply_auto_filter_policy,
     materialize_subscription_proxies,
+    merge_manual_proxies_from_latest,
     persist_and_reload,
     unique_proxy_name,
     unique_proxy_name_from_store,
@@ -1112,8 +1114,10 @@ async def htmx_test_all(
             "proxies_total": len(store_for_test.proxies),
         },
     )
-    updated, err = await persist_and_reload(effective_settings, store_for_test)
-    st.save(updated)
+    async with persist_cycle_lock():
+        store_for_test = merge_manual_proxies_from_latest(store_for_test, st.load())
+        updated, err = await persist_and_reload(effective_settings, store_for_test)
+        st.save(updated)
     log.info("POST /htmx/test-all: завершено для %d узлов", len(store_for_test.proxies))
     auto_excluded = sum(len(s.auto_excluded_uris) for s in updated.subscriptions)
     msg = "Проверка задержек завершена."
@@ -1223,8 +1227,10 @@ async def htmx_test_all_repeat(
         effective_settings,
         mihomo_delay_map=mihomo_delay_map,
     )
-    updated, err = await persist_and_reload(effective_settings, store_for_test)
-    st.save(updated)
+    async with persist_cycle_lock():
+        store_for_test = merge_manual_proxies_from_latest(store_for_test, st.load())
+        updated, err = await persist_and_reload(effective_settings, store_for_test)
+        st.save(updated)
 
     alive_nodes = sum(1 for a in agg.values() if a["alive"] > 0)
     total_nodes = len(agg)
