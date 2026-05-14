@@ -24,7 +24,7 @@ def _truthy(val: str | None) -> bool:
 
 def to_mihomo_trojan_proxy(parsed: ParsedTrojan, name: str) -> dict[str, Any]:
     p = parsed.params
-    network = (get_param(p, "type", "network") or "tcp").lower()
+    network = (get_param(p, "type", "network") or "tcp").lower().strip()
 
     proxy: dict[str, Any] = {
         "name": name,
