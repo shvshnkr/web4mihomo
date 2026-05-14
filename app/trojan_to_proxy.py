@@ -85,4 +85,16 @@ def to_mihomo_trojan_proxy(parsed: ParsedTrojan, name: str) -> dict[str, Any]:
             h2_opts["host"] = [h2_host]
         proxy["h2-opts"] = h2_opts
         return proxy
+    if network == "xhttp":
+        path = get_param(p, "path") or "/"
+        host_header = get_param(p, "host")
+        mode = get_param(p, "mode", "xhttp-mode") or "auto"
+        xopts: dict[str, Any] = {"path": path, "mode": mode}
+        if host_header:
+            xopts["host"] = host_header
+        extra = get_param(p, "extra")
+        if extra:
+            xopts["extra"] = extra
+        proxy["xhttp-opts"] = xopts
+        return proxy
     raise ValueError(f"Неподдерживаемый Trojan transport/network: {network}")
